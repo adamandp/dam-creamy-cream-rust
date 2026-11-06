@@ -1,0 +1,67 @@
+use chrono::{DateTime, NaiveDate, NaiveDateTime, SecondsFormat, Utc};
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use crate::error::{AppError, AppResult};
+
+#[derive(Deserialize, Default)]
+pub struct Pagination {
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+impl Pagination {
+    pub fn checked(&self) -> AppResult<(u64, u64)> {
+        let page = self.page.unwrap_or(1);
+        let limit = self.limit.unwrap_or(10);
+        if !(1..=100).contains(&page) || !(1..=100).contains(&limit) {
+            return Err(AppError::BadRequest(
+                "page and limit must be between 1 and 100".into(),
+            ));
+        }
+        Ok((page as u64, limit as u64))
+    }
+}
+
+pub fn paging(page: u64, limit: u64, total: u64) -> Value {
+    json!({
+        "currentPage": page,
+        "pageSize": limit,
+        "totalItems": total,
+        "totalPages": total.div_ceil(limit),
+    })
+}
+
+pub fn date_time(value: NaiveDateTime) -> String {
+    DateTime::<Utc>::from_naive_utc_and_offset(value, Utc)
+        .to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+pub fn date(value: NaiveDate) -> String {
+    format!("{}T00:00:00.000Z", value.format("%Y-%m-%d"))
+}
+
+pub fn success_verb(verb: &str, resource: &str) -> String {
+    match verb {
+        "created" => format!("🎉 {resource} created successfully! Welcome aboard! 🚀"),
+        "retrieved" => format!("📦 {resource} retrieved successfully! Smooth sailing! 😎"),
+        "updated" => format!("🔄 {resource} updated successfully! Looking fresh! ✨"),
+        "deleted" => format!("🗑️ {resource} deleted successfully! Sayonara! 👋"),
+        _ => resource.to_owned(),
+    }
+}
+
+pub fn success(verb: &str, resource: &str) -> Value {
+    json!({"message": success_verb(verb, resource)})
+}
+
+pub fn parse_uuid(value: &str) -> AppResult<uuid::Uuid> {
+    uuid::Uuid::parse_str(value)
+        .map_err(|_| AppError::BadRequest("Validation failed (uuid is expected)".into()))
+}
+
+pub fn not_found(resource: &str) -> AppError {
+    AppError::NotFound(format!(
+        "🔍 {resource} not found. Maybe it teleported to another dimension? 🛸"
+    ))
+}

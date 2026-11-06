@@ -1,0 +1,142 @@
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::get,
+};
+use chrono::Utc;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QuerySelect,
+};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use validator::Validate;
+
+use crate::{
+    common::{Pagination, not_found, paging, parse_uuid, success, success_verb},
+    entity::role,
+    error::{AppError, AppResult},
+    state::AppState,
+};
+
+#[derive(Deserialize, Validate)]
+pub struct RoleBody {
+    #[validate(length(min = 1, max = 50))]
+    name: String,
+}
+
+fn validate(body: &RoleBody) -> AppResult<()> {
+    body.validate()
+        .map_err(|err| AppError::BadRequest(err.to_string()))
+}
+
+fn response(model: role::Model) -> Value {
+    json!({"id": model.id, "name": model.name})
+}
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/", get(find_all).post(create))
+        .route("/name/{name}", get(find_by_name))
+        .route("/{id}", get(find_one).patch(update).delete(remove))
+}
+
+async fn create(
+    State(state): State<AppState>,
+    Json(body): Json<RoleBody>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    validate(&body)?;
+    let now = Utc::now().naive_utc();
+    role::ActiveModel {
+        id: Set(uuid::Uuid::new_v4()),
+        name: Set(body.name),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&state.db)
+    .await
+    .map_err(AppError::db)?;
+    Ok((StatusCode::CREATED, Json(success("created", "Role"))))
+}
+
+async fn find_all(
+    State(state): State<AppState>,
+    Query(query): Query<Pagination>,
+) -> AppResult<Json<Value>> {
+    let (page, limit) = query.checked()?;
+    let total = role::Entity::find()
+        .count(&state.db)
+        .await
+        .map_err(AppError::db)?;
+    if total == 0 {
+        return Err(not_found("Role"));
+    }
+    let items = role::Entity::find()
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all(&state.db)
+        .await
+        .map_err(AppError::db)?;
+    Ok(Json(json!({
+        // Intentionally matches the legacy RolesService response string.
+        "message": success_verb("retrieved", "Category"),
+        "data": items.into_iter().map(response).collect::<Vec<_>>(),
+        "paging": paging(page, limit, total),
+    })))
+}
+
+async fn find_one(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let model = role::Entity::find_by_id(parse_uuid(&id)?)
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Role"))?;
+    Ok(Json(
+        json!({"message": success_verb("retrieved", "Role"), "data": response(model)}),
+    ))
+}
+
+async fn find_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> AppResult<Json<Value>> {
+    let model = role::Entity::find()
+        .filter(role::Column::Name.eq(name))
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Role"))?;
+    Ok(Json(
+        json!({"message": success_verb("retrieved", "Role"), "data": response(model)}),
+    ))
+}
+
+async fn update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<RoleBody>,
+) -> AppResult<Json<Value>> {
+    validate(&body)?;
+    let model = role::Entity::find_by_id(parse_uuid(&id)?)
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Role"))?;
+    let mut active: role::ActiveModel = model.into();
+    active.name = Set(body.name);
+    active.updated_at = Set(Utc::now().naive_utc());
+    active.update(&state.db).await.map_err(AppError::db)?;
+    Ok(Json(success("updated", "Role")))
+}
+
+async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let result = role::Entity::delete_by_id(parse_uuid(&id)?)
+        .exec(&state.db)
+        .await
+        .map_err(AppError::db)?;
+    if result.rows_affected == 0 {
+        return Err(not_found("Role"));
+    }
+    Ok(Json(success("deleted", "Role")))
+}

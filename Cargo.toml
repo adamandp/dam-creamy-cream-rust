@@ -1,0 +1,33 @@
+[package]
+name = "dam-creamy-cream-rust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+aws-credential-types = "1"
+aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
+bcrypt = "0.17"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+jsonwebtoken = "9"
+redis = { version = "0.32", features = ["tokio-comp"] }
+regex = "1"
+sea-orm = { version = "2", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_with = "3"
+thiserror = "2"
+time = "0.3"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+validator = { version = "0.20", features = ["derive"] }
+
+[dev-dependencies]
+sea-orm = { version = "2", features = ["mock"] }
+tower = { version = "0.5", features = ["util"] }

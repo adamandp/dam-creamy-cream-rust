@@ -1,0 +1,64 @@
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use serde_json::json;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("{0}")]
+    Unauthorized(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("internal server error: {0}")]
+    Internal(String),
+}
+
+impl AppError {
+    pub fn db(err: sea_orm::DbErr) -> Self {
+        tracing::error!(error = %err, "database operation failed");
+        let error = err.to_string();
+        if error.contains("duplicate key") || error.contains("23505") {
+            return Self::Conflict("Resource already exists".into());
+        }
+        if error.contains("foreign key") || error.contains("23503") {
+            return Self::Conflict("Resource is still referenced".into());
+        }
+        Self::Internal("database operation failed".into())
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error, message) = match self {
+            Self::BadRequest(s) => (StatusCode::BAD_REQUEST, "Bad Request", s),
+            Self::Unauthorized(s) => (StatusCode::UNAUTHORIZED, "Unauthorized", s),
+            Self::Forbidden(s) => (StatusCode::FORBIDDEN, "Forbidden", s),
+            Self::NotFound(s) => (StatusCode::NOT_FOUND, "Not Found", s),
+            Self::Conflict(s) => (StatusCode::CONFLICT, "Conflict", s),
+            Self::Internal(s) => {
+                tracing::error!(error = %s, "internal request failure");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error",
+                    "Internal server error".to_owned(),
+                )
+            }
+        };
+        (
+            status,
+            Json(json!({"message": message, "error": error, "statusCode": status.as_u16()})),
+        )
+            .into_response()
+    }
+}
+
+pub type AppResult<T> = Result<T, AppError>;
