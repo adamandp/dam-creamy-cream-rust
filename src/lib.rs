@@ -217,4 +217,17 @@ mod tests {
         assert_eq!(refresh_status, StatusCode::UNAUTHORIZED);
         assert_eq!(profile_status, StatusCode::UNAUTHORIZED);
     }
+
+    #[tokio::test]
+    async fn collection_routes_accept_paths_without_trailing_slash() {
+        let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
+        for path in ["/roles", "/users", "/addresses"] {
+            let (status, _) = request(app.clone(), path).await;
+            assert_ne!(
+                status,
+                StatusCode::NOT_FOUND,
+                "collection route missing: {path}"
+            );
+        }
+    }
 }
