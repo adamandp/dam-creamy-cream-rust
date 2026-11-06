@@ -7,6 +7,7 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{Value, json};
+use woothee::parser::Parser;
 
 use super::session;
 use crate::{
@@ -36,6 +37,27 @@ pub async fn hash_password(plain: String) -> AppResult<String> {
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
+fn browser_info(user_agent: &str, ip: &str) -> String {
+    let parser = Parser::new();
+    let parsed = parser.parse(user_agent);
+    let browser = parsed.as_ref().map_or_else(
+        || "Unknown Unknown".to_owned(),
+        |value| format!("{} {}", value.name, value.version),
+    );
+    let os = parsed.as_ref().map_or_else(
+        || "Unknown Unknown".to_owned(),
+        |value| format!("{} {}", value.os, value.os_version),
+    );
+    let device = parsed
+        .as_ref()
+        .map_or("Unknown", |value| match value.category {
+            "smartphone" | "mobilephone" => "mobile",
+            "tablet" => "tablet",
+            _ => "Unknown",
+        });
+    json!({"ip": ip, "browser": browser, "os": os, "device": device}).to_string()
+}
+
 async fn dummy_login(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -60,7 +82,7 @@ async fn dummy_login(
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unkown");
-    let browser_info = json!({"ip": ip, "browser": "Unknown Unknown", "os": "Unknown Unknown", "device": "Unknown", "userAgent": format!("dummy-{ua}")}).to_string();
+    let browser_info = browser_info(&format!("dummy-{ua}"), ip);
     let old = jar.get("refreshToken").map(|v| v.value());
     let (access, refresh) = session::create_dummy_tokens(
         &state,
@@ -127,4 +149,19 @@ async fn logout_all(
             ),
         ),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::browser_info;
+
+    #[test]
+    fn stores_parsed_browser_metadata_in_legacy_shape() {
+        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        let value: serde_json::Value =
+            serde_json::from_str(&browser_info(&format!("dummy-{ua}"), "127.0.0.1")).unwrap();
+        assert!(value["browser"].as_str().unwrap().contains("Chrome"));
+        assert_eq!(value["ip"], "127.0.0.1");
+        assert!(value.get("userAgent").is_none());
+    }
 }

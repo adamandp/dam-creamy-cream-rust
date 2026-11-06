@@ -34,6 +34,7 @@ Uploads are limited to 2 MiB and `image/jpeg`, `image/png`, or `image/webp`. The
 - The existing Prisma SQL migrations remain authoritative. This PR does not drop/create/change production tables or data. Apply the NestJS migrations to new development databases before running this API.
 - SeaORM creates a shared PostgreSQL connection pool, and the app verifies Redis with PING and MinIO bucket availability at startup.
 - JWT access tokens are HS256, 15-minute; refresh tokens HS256, 7-day, persisted in `user_tokens` and issued in an HttpOnly `refreshToken` cookie (`SameSite=Lax`, Secure in production).
+- Session browser/OS/device metadata is parsed using Woothee. Its exact classifications can differ from the legacy `ua-parser-js` implementation, while the stored JSON field names remain the same.
 - `PASSWORD` hashing continues to use bcrypt cost 10; password comparison is run in a blocking worker.
 - JSON responses retain NestJS `message`, `data`, and `paging` conventions, with the same emoji response messages where possible.
 
