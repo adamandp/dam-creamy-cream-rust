@@ -721,27 +721,11 @@ async fn confirm_image(
         ));
     }
     let final_key = format!("users/{id}/{asset_id}");
-    // Idempotent retry: the staging object may already have been removed by
-    // the first successful confirm. The persisted image URL is authoritative.
-    let existing_user = user::Entity::find_by_id(id)
-        .one(&state.db)
-        .await
-        .map_err(AppError::db)?
-        .ok_or_else(|| not_found("User"))?;
-    if existing_user
-        .image_url
-        .as_deref()
-        .and_then(|value| persisted_image_key(value, id))
-        .as_deref()
-        == Some(final_key.as_str())
-    {
-        return Ok((StatusCode::CREATED, Json(success("updated", "User Image"))));
-    }
-    let etag = state.storage.verify_image(&input.key).await?;
     let write_result: AppResult<Option<String>> = async {
         let tx = state.db.begin().await.map_err(AppError::db)?;
-        // Serialize both the immutable copy and the metadata update on the
-        // user row. This prevents double-confirm from deleting a live object.
+        // Lock before checking the stage object, so a concurrent retry cannot
+        // observe the old image then fail after the first request removes the
+        // staging key. The copy and DB update share the same serialized lock.
         let row = user::Entity::find_by_id(id)
             .lock_exclusive()
             .one(&tx)
@@ -758,6 +742,7 @@ async fn confirm_image(
             tx.commit().await.map_err(AppError::db)?;
             return Ok(None);
         }
+        let etag = state.storage.verify_image(&input.key).await?;
         let previous_key = row
             .image_url
             .as_deref()
@@ -777,22 +762,12 @@ async fn confirm_image(
     let previous_key = match write_result {
         Ok(key) => key,
         Err(err) => {
-            let currently_referenced = user::Entity::find_by_id(id)
-                .one(&state.db)
-                .await
-                .ok()
-                .flatten()
-                .is_some_and(|user| {
-                    user.image_url
-                        .as_deref()
-                        .and_then(|value| persisted_image_key(value, id))
-                        .as_deref()
-                        == Some(final_key.as_str())
-                });
-            if !currently_referenced
-                && let Err(cleanup_err) = state.storage.delete_image(&final_key).await
-            {
-                tracing::warn!(error = %cleanup_err, "could not clean up failed image confirmation");
+            if let Err(cleanup_err) = cleanup_failed_final_image(&state, id, &final_key).await {
+                tracing::warn!(
+                    error = %cleanup_err,
+                    object_key = final_key,
+                    "could not safely clean up failed image confirmation"
+                );
             }
             return Err(err);
         }
@@ -804,6 +779,34 @@ async fn confirm_image(
         }
     }
     Ok((StatusCode::CREATED, Json(success("updated", "User Image"))))
+}
+
+// Never check the image pointer and delete its MinIO object without holding
+// the same user-row lock as confirm_image. A competing confirmation might
+// otherwise commit between the check and deletion and lose its live image.
+// If the database is unavailable, leave an orphan for later reconciliation
+// rather than risk removing a currently referenced object.
+pub(crate) async fn cleanup_failed_final_image(
+    state: &AppState,
+    user_id: Uuid,
+    final_key: &str,
+) -> AppResult<()> {
+    let tx = state.db.begin().await.map_err(AppError::db)?;
+    let account = user::Entity::find_by_id(user_id)
+        .lock_exclusive()
+        .one(&tx)
+        .await
+        .map_err(AppError::db)?;
+    let is_active_image = account
+        .as_ref()
+        .and_then(|account| account.image_url.as_deref())
+        .and_then(|url| persisted_image_key(url, user_id))
+        .is_some_and(|key| key == final_key);
+    if !is_active_image {
+        state.storage.delete_image(final_key).await?;
+    }
+    tx.commit().await.map_err(AppError::db)?;
+    Ok(())
 }
 
 fn obsolete_image_keys(pending: String, previous: Option<String>, current: &str) -> Vec<String> {

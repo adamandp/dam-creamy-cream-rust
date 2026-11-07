@@ -401,7 +401,7 @@ mod tests {
             "CREATE TYPE \"GENDER_TYPE\" AS ENUM ('MALE', 'FEMALE', 'OTHER')",
             "CREATE TABLE roles (id UUID PRIMARY KEY, name VARCHAR(50) UNIQUE NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
             "CREATE TABLE users (id UUID PRIMARY KEY, role_id UUID NOT NULL REFERENCES roles(id), username VARCHAR(50) UNIQUE NOT NULL, email VARCHAR(255), phone_number VARCHAR(100), password VARCHAR(255) NOT NULL, full_name VARCHAR(100) NOT NULL, birth_date DATE, image_url VARCHAR(255), gender \"GENDER_TYPE\", is_active BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
-            "CREATE TABLE addresses (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), recipient_name VARCHAR(100) NOT NULL, recipient_phone_number VARCHAR(100) NOT NULL, province VARCHAR(100) NOT NULL, city VARCHAR(100) NOT NULL, subdistrict VARCHAR(100) NOT NULL, village VARCHAR(100) NOT NULL, postal_code VARCHAR(100) NOT NULL, address VARCHAR(100) NOT NULL, is_primary BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+            "CREATE TABLE addresses (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), recipient_name VARCHAR(100) NOT NULL, recipient_phone_number VARCHAR(100) NOT NULL, province VARCHAR(100) NOT NULL, city VARCHAR(100) NOT NULL, subdistrict VARCHAR(100) NOT NULL, village VARCHAR(100) NOT NULL, postal_code VARCHAR(50) NOT NULL, address VARCHAR(255) NOT NULL, is_primary BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
             "CREATE TABLE carts (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
             "CREATE TABLE cart_items (id UUID PRIMARY KEY, cart_id UUID NOT NULL REFERENCES carts(id))",
             "CREATE TABLE user_tokens (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), token VARCHAR(255) UNIQUE NOT NULL, \"browserInfo\" TEXT NOT NULL, \"expiredAt\" TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
@@ -607,6 +607,19 @@ mod tests {
                 "isPrimary": primary
             })
         };
+        let mut invalid_postal_code = address_body("Invalid postal", false);
+        invalid_postal_code["postalCode"] = json!("X".repeat(51));
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::POST,
+                "/addresses".into(),
+                owner_token.clone(),
+                invalid_postal_code
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
         assert_eq!(
             send_json(
                 app.clone(),
@@ -646,6 +659,17 @@ mod tests {
             .find(|address| address.recipient_name == "Second")
             .unwrap()
             .id;
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/addresses/{first}"),
+                owner_token.clone(),
+                json!({"postalCode": "X".repeat(51)})
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
         assert_eq!(
             send_json(
                 app.clone(),
