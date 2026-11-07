@@ -478,6 +478,34 @@ mod tests {
             config: cfg,
         });
 
+        // The fixture assigns identical created_at timestamps to every role
+        // and user. This catches offset pagination without a deterministic
+        // UUID tie-breaker, including across consecutive page requests.
+        let mut role_ids = vec![customer_role, admin_role, root_role];
+        role_ids.sort_unstable();
+        for (index, expected_id) in role_ids.iter().enumerate() {
+            let (status, result) = request(
+                app.clone(),
+                &format!("/roles?page={}&limit=1", index + 1),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(result["data"][0]["id"], expected_id.to_string());
+        }
+        let mut user_ids = vec![owner, stranger, administrator, root];
+        user_ids.sort_unstable();
+        for (index, expected_id) in user_ids.iter().enumerate() {
+            let (status, result) = authorized_request(
+                app.clone(),
+                &format!("/users?page={}&limit=1", index + 1),
+                root,
+                root_role,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(result["data"][0]["id"], expected_id.to_string());
+        }
+
         assert_eq!(
             send_json(
                 app.clone(),
@@ -648,6 +676,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
+
+        let mut ordered_addresses = rows.clone();
+        ordered_addresses.sort_by_key(|row| (row.created_at, row.id));
+        for (index, expected) in ordered_addresses.iter().enumerate() {
+            let (status, result) = authorized_request(
+                app.clone(),
+                &format!("/addresses?page={}&limit=1", index + 1),
+                root,
+                root_role,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(result["data"][0]["id"], expected.id.to_string());
+        }
 
         let first = rows
             .iter()

@@ -7,7 +7,7 @@ use axum::{
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QuerySelect,
+    QueryOrder, QuerySelect,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -83,6 +83,8 @@ async fn find_all(
         return Err(not_found("Role"));
     }
     let items = role::Entity::find()
+        .order_by_asc(role::Column::CreatedAt)
+        .order_by_asc(role::Column::Id)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&state.db)

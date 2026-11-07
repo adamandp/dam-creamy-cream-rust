@@ -230,6 +230,8 @@ async fn find_all(
         .await
         .map_err(AppError::db)?;
     let items = address::Entity::find()
+        .order_by_asc(address::Column::CreatedAt)
+        .order_by_asc(address::Column::Id)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&state.db)

@@ -9,7 +9,7 @@ use chrono::{NaiveDate, Utc};
 use regex::Regex;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, DbBackend,
-    EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Statement, TransactionTrait,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -327,6 +327,8 @@ async fn find_all(
         return Err(not_found("User"));
     }
     let rows = user::Entity::find()
+        .order_by_asc(user::Column::CreatedAt)
+        .order_by_asc(user::Column::Id)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&state.db)
