@@ -48,7 +48,10 @@ pub fn router(state: AppState) -> Router {
         .nest("/vouchers", features::vouchers::routes())
         .nest("/user-vouchers", features::user_vouchers::routes())
         .route("/media/users/{id}/{asset}", get(features::users::get_image))
-        .route("/media/products/{id}/{asset}", get(features::products::get_image))
+        .route(
+            "/media/products/{id}/{asset}",
+            get(features::products::get_image),
+        )
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()

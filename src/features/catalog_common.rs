@@ -1,7 +1,10 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{Value, json};
 
-use crate::{common::{date_time, paging, success_verb}, error::{AppError, AppResult}};
+use crate::{
+    common::{date_time, paging, success_verb},
+    error::{AppError, AppResult},
+};
 
 pub fn collection(name: &str, data: Vec<Value>, page: u64, limit: u64, total: u64) -> Value {
     json!({ "message": success_verb("retrieved", name), "data": data, "paging": paging(page, limit, total) })
@@ -24,7 +27,9 @@ pub fn parse_datetime(s: &str) -> AppResult<NaiveDateTime> {
 
 pub fn require_text(value: &str, min: usize, max: usize, field: &str) -> AppResult<()> {
     if value.chars().count() < min || value.chars().count() > max {
-        Err(AppError::BadRequest(format!("{field} must be {min}–{max} characters")))
+        Err(AppError::BadRequest(format!(
+            "{field} must be {min}–{max} characters"
+        )))
     } else {
         Ok(())
     }
@@ -32,7 +37,9 @@ pub fn require_text(value: &str, min: usize, max: usize, field: &str) -> AppResu
 
 pub fn require_positive(value: f64, min: f64, max: f64, field: &str) -> AppResult<()> {
     if !value.is_finite() || !(min..=max).contains(&value) {
-        Err(AppError::BadRequest(format!("{field} must be between {min} and {max}")))
+        Err(AppError::BadRequest(format!(
+            "{field} must be between {min} and {max}"
+        )))
     } else {
         Ok(())
     }
@@ -40,7 +47,9 @@ pub fn require_positive(value: f64, min: f64, max: f64, field: &str) -> AppResul
 
 pub fn reject_no_change(changed: &[Option<bool>]) -> AppResult<()> {
     if changed.iter().all(Option::is_none) || changed.contains(&Some(true)) {
-        return Err(AppError::BadRequest("📭 No changes detected. Everything is already up to date! 👍".into()));
+        return Err(AppError::BadRequest(
+            "📭 No changes detected. Everything is already up to date! 👍".into(),
+        ));
     }
     Ok(())
 }

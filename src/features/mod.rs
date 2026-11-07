@@ -11,6 +11,6 @@ pub mod products;
 pub mod reviews;
 pub mod roles;
 pub mod session;
-pub mod users;
 pub mod user_vouchers;
+pub mod users;
 pub mod vouchers;

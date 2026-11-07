@@ -1,7 +1,13 @@
 use sea_orm::entity::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, serde::Serialize, serde::Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "USER_VOUCHER_STATUS")]
+#[derive(
+    Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, serde::Serialize, serde::Deserialize,
+)]
+#[sea_orm(
+    rs_type = "String",
+    db_type = "Enum",
+    enum_name = "USER_VOUCHER_STATUS"
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserVoucherStatus {
     #[sea_orm(string_value = "USED")]

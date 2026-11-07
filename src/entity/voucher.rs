@@ -1,6 +1,8 @@
 use sea_orm::entity::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, serde::Serialize, serde::Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "VOUCHER_TYPE")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum VoucherType {
@@ -12,7 +14,9 @@ pub enum VoucherType {
     FreeItem,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, serde::Serialize, serde::Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "VOUCHER_GROUP")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum VoucherGroup {
