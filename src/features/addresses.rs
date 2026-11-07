@@ -356,18 +356,27 @@ async fn update(
                 .as_ref()
                 .map(|v| v == &model.recipient_phone_number),
         ),
-        ("province", body.province.as_ref().map(|v| v == &model.province)),
+        (
+            "province",
+            body.province.as_ref().map(|v| v == &model.province),
+        ),
         ("city", body.city.as_ref().map(|v| v == &model.city)),
         (
             "subdistrict",
             body.subdistrict.as_ref().map(|v| v == &model.subdistrict),
         ),
-        ("village", body.village.as_ref().map(|v| v == &model.village)),
+        (
+            "village",
+            body.village.as_ref().map(|v| v == &model.village),
+        ),
         (
             "postalCode",
             body.postal_code.as_ref().map(|v| v == &model.postal_code),
         ),
-        ("address", body.address.as_ref().map(|v| v == &model.address)),
+        (
+            "address",
+            body.address.as_ref().map(|v| v == &model.address),
+        ),
         (
             "isPrimary",
             body.is_primary.as_ref().map(|v| v == &model.is_primary),

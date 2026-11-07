@@ -1146,7 +1146,10 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .image_url,
-            Some(format!("{}/media/users/{root}/{asset}", runtime.config.public_base_url))
+            Some(format!(
+                "{}/media/users/{root}/{asset}",
+                runtime.config.public_base_url
+            ))
         );
     }
 }

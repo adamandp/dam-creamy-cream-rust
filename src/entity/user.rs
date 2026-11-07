@@ -61,7 +61,10 @@ mod tests {
             serde_json::from_str::<GenderType>("\"WOMAN\"").unwrap(),
             GenderType::Female
         );
-        assert_eq!(serde_json::to_string(&GenderType::Male).unwrap(), "\"MALE\"");
+        assert_eq!(
+            serde_json::to_string(&GenderType::Male).unwrap(),
+            "\"MALE\""
+        );
         assert_eq!(
             serde_json::to_string(&GenderType::Female).unwrap(),
             "\"FEMALE\""

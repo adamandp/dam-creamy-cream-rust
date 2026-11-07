@@ -462,19 +462,28 @@ async fn update(
         .transpose()?;
     require_changed_update(&[
         ("roleId", input.role_id.as_ref().map(|v| v == &row.role_id)),
-        ("username", input.username.as_ref().map(|v| v == &row.username)),
+        (
+            "username",
+            input.username.as_ref().map(|v| v == &row.username),
+        ),
         ("email", input.email.as_ref().map(|v| v == &row.email)),
         (
             "phoneNumber",
             input.phone_number.as_ref().map(|v| v == &row.phone_number),
         ),
-        ("fullName", input.full_name.as_ref().map(|v| v == &row.full_name)),
+        (
+            "fullName",
+            input.full_name.as_ref().map(|v| v == &row.full_name),
+        ),
         (
             "birthDate",
             requested_birth_date.as_ref().map(|v| v == &row.birth_date),
         ),
         ("gender", input.gender.as_ref().map(|v| v == &row.gender)),
-        ("isActive", input.is_active.as_ref().map(|v| v == &row.is_active)),
+        (
+            "isActive",
+            input.is_active.as_ref().map(|v| v == &row.is_active),
+        ),
     ])?;
     unique_fields(
         &state,
