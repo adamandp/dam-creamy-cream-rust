@@ -32,6 +32,10 @@ impl Config {
         if access_jwt_secret.len() < 32 || refresh_jwt_secret.len() < 32 {
             return Err("JWT secrets must be at least 32 bytes".to_owned());
         }
+        if access_jwt_secret == refresh_jwt_secret {
+            return Err("ACCESS_JWT_SECRET and REFRESH_JWT_SECRET must differ".to_owned());
+        }
+        let production = env::var("NODE_ENV").is_ok_and(|v| v == "production");
         let public_base_url =
             env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| format!("http://localhost:{port}"));
         if !public_base_url.starts_with("http://") && !public_base_url.starts_with("https://") {
@@ -41,6 +45,18 @@ impl Config {
         if !minio_endpoint.starts_with("http://") && !minio_endpoint.starts_with("https://") {
             return Err("MINIO_ENDPOINT must include http:// or https://".to_owned());
         }
+        let frontend_origins = env::var("FRONTEND_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .collect::<Vec<_>>();
+        if production && frontend_origins.is_empty() {
+            return Err("FRONTEND_ORIGINS is required in production".to_owned());
+        }
+        if production && !minio_endpoint.starts_with("https://") {
+            return Err("MINIO_ENDPOINT must use HTTPS for browser uploads in production".to_owned());
+        }
         Ok(Self {
             port,
             database_url: required("DATABASE_URL")?,
@@ -48,18 +64,13 @@ impl Config {
             access_jwt_secret,
             refresh_jwt_secret,
             public_base_url: public_base_url.trim_end_matches('/').into(),
-            frontend_origins: env::var("FRONTEND_ORIGINS")
-                .unwrap_or_default()
-                .split(',')
-                .map(|v| v.trim().to_owned())
-                .filter(|v| !v.is_empty())
-                .collect(),
+            frontend_origins,
             minio_endpoint,
             minio_access_key: required("MINIO_ACCESS_KEY")?,
             minio_secret_key: required("MINIO_SECRET_KEY")?,
             minio_bucket: env::var("MINIO_BUCKET").unwrap_or_else(|_| "creamy-cream".into()),
             minio_region: env::var("MINIO_REGION").unwrap_or_else(|_| "us-east-1".into()),
-            production: env::var("NODE_ENV").is_ok_and(|v| v == "production"),
+            production,
         })
     }
 }

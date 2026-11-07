@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
     routing::get,
 };
 use chrono::Utc;
@@ -13,10 +13,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use validator::Validate;
 
+use super::authorization;
 use crate::{
     common::{Pagination, not_found, paging, parse_uuid, success, success_verb},
     entity::role,
     error::{AppError, AppResult},
+    extract::{ApiJson, ApiQuery},
     state::AppState,
 };
 
@@ -44,8 +46,12 @@ pub fn routes() -> Router<AppState> {
 
 async fn create(
     State(state): State<AppState>,
-    Json(body): Json<RoleBody>,
+    headers: HeaderMap,
+    ApiJson(body): ApiJson<RoleBody>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_super_admin()?;
     validate(&body)?;
     let now = Utc::now().naive_utc();
     role::ActiveModel {
@@ -62,7 +68,7 @@ async fn create(
 
 async fn find_all(
     State(state): State<AppState>,
-    Query(query): Query<Pagination>,
+    ApiQuery(query): ApiQuery<Pagination>,
 ) -> AppResult<Json<Value>> {
     let (page, limit) = query.checked()?;
     let total = role::Entity::find()
@@ -115,8 +121,12 @@ async fn find_by_name(
 async fn update(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<RoleBody>,
+    headers: HeaderMap,
+    ApiJson(body): ApiJson<RoleBody>,
 ) -> AppResult<Json<Value>> {
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_super_admin()?;
     validate(&body)?;
     let model = role::Entity::find_by_id(parse_uuid(&id)?)
         .one(&state.db)
@@ -130,7 +140,14 @@ async fn update(
     Ok(Json(success("updated", "Role")))
 }
 
-async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
+async fn remove(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_super_admin()?;
     let result = role::Entity::delete_by_id(parse_uuid(&id)?)
         .exec(&state.db)
         .await

@@ -1,25 +1,26 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
     routing::get,
 };
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, TransactionTrait,
+    QueryOrder, QuerySelect, TransactionTrait, DatabaseTransaction,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 use validator::Validate;
 
-use super::session;
+use super::{authorization, session};
 use crate::{
     common::{Pagination, date_time, not_found, paging, parse_uuid, success, success_verb},
     entity::{address, user},
     error::{AppError, AppResult},
+    extract::{ApiJson, ApiQuery},
     state::AppState,
 };
 
@@ -115,10 +116,51 @@ pub fn routes() -> Router<AppState> {
         .route("/{id}", get(find_one).patch(update).delete(remove))
 }
 
+// Called while holding the corresponding user's row lock. Repairs legacy data with
+// multiple primary addresses, and guarantees exactly one primary if any exist.
+async fn normalize_primary(
+    tx: &DatabaseTransaction,
+    user_id: Uuid,
+    preferred: Option<Uuid>,
+) -> AppResult<()> {
+    let addresses = address::Entity::find()
+        .filter(address::Column::UserId.eq(user_id))
+        .order_by_asc(address::Column::CreatedAt)
+        .order_by_asc(address::Column::Id)
+        .all(tx)
+        .await
+        .map_err(AppError::db)?;
+    if addresses.is_empty() {
+        return Ok(());
+    }
+    let primary_id = preferred
+        .filter(|id| addresses.iter().any(|item| item.id == *id))
+        .or_else(|| addresses.iter().find(|item| item.is_primary).map(|item| item.id))
+        .unwrap_or(addresses[0].id);
+    address::Entity::update_many()
+        .col_expr(address::Column::IsPrimary, false.into())
+        .filter(address::Column::UserId.eq(user_id))
+        .filter(address::Column::Id.ne(primary_id))
+        .exec(tx)
+        .await
+        .map_err(AppError::db)?;
+    address::Entity::update_many()
+        .col_expr(address::Column::IsPrimary, true.into())
+        .filter(address::Column::Id.eq(primary_id))
+        .exec(tx)
+        .await
+        .map_err(AppError::db)?;
+    Ok(())
+}
+
 async fn create(
     State(state): State<AppState>,
-    Json(body): Json<CreateAddressBody>,
+    headers: HeaderMap,
+    ApiJson(body): ApiJson<CreateAddressBody>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_owner_or_admin(body.user_id)?;
     body.validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     validate_recipient_name(&body.recipient_name)?;
@@ -140,18 +182,10 @@ async fn create(
         .await
         .map_err(AppError::db)?;
     let primary = count == 0 || body.is_primary;
-    if primary {
-        address::Entity::update_many()
-            .col_expr(address::Column::IsPrimary, false.into())
-            .filter(address::Column::UserId.eq(body.user_id))
-            .filter(address::Column::IsPrimary.eq(true))
-            .exec(&tx)
-            .await
-            .map_err(AppError::db)?;
-    }
     let now = Utc::now().naive_utc();
+    let new_id = Uuid::new_v4();
     address::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(new_id),
         user_id: Set(body.user_id),
         recipient_name: Set(body.recipient_name),
         recipient_phone_number: Set(body.recipient_phone_number),
@@ -168,6 +202,7 @@ async fn create(
     .insert(&tx)
     .await
     .map_err(AppError::db)?;
+    normalize_primary(&tx, body.user_id, primary.then_some(new_id)).await?;
     tx.commit().await.map_err(AppError::db)?;
     Ok((
         StatusCode::CREATED,
@@ -177,8 +212,12 @@ async fn create(
 
 async fn find_all(
     State(state): State<AppState>,
-    Query(query): Query<Pagination>,
+    headers: HeaderMap,
+    ApiQuery(query): ApiQuery<Pagination>,
 ) -> AppResult<Json<Value>> {
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_admin()?;
     let (page, limit) = query.checked()?;
     let total = address::Entity::find()
         .count(&state.db)
@@ -198,12 +237,19 @@ async fn find_all(
     })))
 }
 
-async fn find_one(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
+async fn find_one(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
     let model = address::Entity::find_by_id(parse_uuid(&id)?)
         .one(&state.db)
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Address"))?;
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_owner_or_admin(model.user_id)?;
     Ok(Json(
         json!({"message": success_verb("retrieved", "Address"), "data": response(model)}),
     ))
@@ -229,8 +275,11 @@ async fn find_by_user(State(state): State<AppState>, jar: CookieJar) -> AppResul
 async fn update(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<UpdateAddressBody>,
+    headers: HeaderMap,
+    ApiJson(body): ApiJson<UpdateAddressBody>,
 ) -> AppResult<Json<Value>> {
+    let id = parse_uuid(&id)?;
+    let actor = authorization::authenticate(&state, &headers).await?;
     body.validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     if let Some(name) = body.recipient_name.as_deref() {
@@ -239,14 +288,63 @@ async fn update(
     if let Some(phone) = body.recipient_phone_number.as_deref() {
         validate_recipient_phone(phone)?;
     }
-    let model = address::Entity::find_by_id(parse_uuid(&id)?)
-        .one(&state.db)
+    let tx = state.db.begin().await.map_err(AppError::db)?;
+    let initial = address::Entity::find_by_id(id)
+        .one(&tx)
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Address"))?;
+    actor.require_owner_or_admin(initial.user_id)?;
+    let target_user_id = body.user_id.unwrap_or(initial.user_id);
+    if target_user_id != initial.user_id {
+        // Moving an address between accounts is an administrative operation.
+        actor.require_admin()?;
+    }
+    let mut lock_ids = vec![initial.user_id, target_user_id];
+    lock_ids.sort_unstable();
+    lock_ids.dedup();
+    let locked_users = user::Entity::find()
+        .filter(user::Column::Id.is_in(lock_ids.iter().copied()))
+        .order_by_asc(user::Column::Id)
+        .lock_exclusive()
+        .all(&tx)
+        .await
+        .map_err(AppError::db)?;
+    if locked_users.len() != lock_ids.len() {
+        return Err(not_found("User"));
+    }
+    let model = address::Entity::find_by_id(id)
+        .one(&tx)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Address"))?;
+    if model.user_id != initial.user_id {
+        return Err(AppError::Conflict("Address changed concurrently; retry".into()));
+    }
+    let moving = target_user_id != initial.user_id;
+    let destination_count = if moving {
+        let count = address::Entity::find()
+            .filter(address::Column::UserId.eq(target_user_id))
+            .count(&tx)
+            .await
+            .map_err(AppError::db)?;
+        let source_count = address::Entity::find()
+            .filter(address::Column::UserId.eq(initial.user_id))
+            .count(&tx)
+            .await
+            .map_err(AppError::db)?;
+        if source_count <= 1 {
+            return Err(AppError::Conflict(
+                "Cannot move a user's last address to another account".into(),
+            ));
+        }
+        count
+    } else {
+        0
+    };
     let mut active: address::ActiveModel = model.into();
-    if let Some(v) = body.user_id {
-        active.user_id = Set(v);
+    if moving {
+        active.user_id = Set(target_user_id);
     }
     if let Some(v) = body.recipient_name {
         active.recipient_name = Set(v);
@@ -274,26 +372,66 @@ async fn update(
     }
     if let Some(v) = body.is_primary {
         active.is_primary = Set(v);
+    } else if moving {
+        // Do not steal the destination user's existing primary address.
+        active.is_primary = Set(destination_count == 0);
+    }
+    if moving && destination_count == 0 {
+        active.is_primary = Set(true);
     }
     active.updated_at = Set(Utc::now().naive_utc());
-    active.update(&state.db).await.map_err(AppError::db)?;
+    active.update(&tx).await.map_err(AppError::db)?;
+    if moving {
+        normalize_primary(&tx, initial.user_id, None).await?;
+    }
+    let preferred = if body.is_primary == Some(true) || (moving && destination_count == 0) {
+        Some(id)
+    } else if body.is_primary == Some(false) && !moving {
+        // Deselecting the primary should promote another address when possible.
+        address::Entity::find()
+            .filter(address::Column::UserId.eq(target_user_id))
+            .filter(address::Column::Id.ne(id))
+            .order_by_asc(address::Column::CreatedAt)
+            .one(&tx)
+            .await
+            .map_err(AppError::db)?
+            .map(|address| address.id)
+    } else {
+        None
+    };
+    normalize_primary(&tx, target_user_id, preferred).await?;
+    tx.commit().await.map_err(AppError::db)?;
     Ok(Json(success("updated", "Address")))
 }
 
-async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
+async fn remove(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
     let id = parse_uuid(&id)?;
+    let actor = authorization::authenticate(&state, &headers).await?;
     let tx = state.db.begin().await.map_err(AppError::db)?;
-    let model = address::Entity::find_by_id(id)
+    let initial = address::Entity::find_by_id(id)
         .one(&tx)
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Address"))?;
-    user::Entity::find_by_id(model.user_id)
+    actor.require_owner_or_admin(initial.user_id)?;
+    user::Entity::find_by_id(initial.user_id)
         .lock_exclusive()
         .one(&tx)
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
+    let model = address::Entity::find_by_id(id)
+        .one(&tx)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Address"))?;
+    if model.user_id != initial.user_id {
+        return Err(AppError::Conflict("Address changed concurrently; retry".into()));
+    }
     let total = address::Entity::find()
         .filter(address::Column::UserId.eq(model.user_id))
         .count(&tx)
@@ -306,6 +444,7 @@ async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> AppRes
         .exec(&tx)
         .await
         .map_err(AppError::db)?;
+    normalize_primary(&tx, model.user_id, None).await?;
     tx.commit().await.map_err(AppError::db)?;
     Ok(Json(success("deleted", "Address")))
 }

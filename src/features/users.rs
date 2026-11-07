@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::Redirect,
     routing::get,
@@ -17,11 +17,12 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 use validator::Validate;
 
-use super::{auth, session};
+use super::{auth, authorization};
 use crate::{
     common::{Pagination, date, date_time, not_found, paging, parse_uuid, success, success_verb},
     entity::{cart, role, user},
     error::{AppError, AppResult},
+    extract::{ApiJson, ApiQuery},
     state::AppState,
 };
 
@@ -291,8 +292,12 @@ pub async fn create_internal(state: &AppState, input: CreateUserBody) -> AppResu
 
 async fn find_all(
     State(state): State<AppState>,
-    Query(query): Query<Pagination>,
+    headers: HeaderMap,
+    ApiQuery(query): ApiQuery<Pagination>,
 ) -> AppResult<Json<Value>> {
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_admin()?;
     let (page, limit) = query.checked()?;
     let total = user::Entity::find()
         .count(&state.db)
@@ -314,8 +319,16 @@ async fn find_all(
     })))
 }
 
-async fn find_one(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    let row = user::Entity::find_by_id(parse_uuid(&id)?)
+async fn find_one(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
+    let id = parse_uuid(&id)?;
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_owner_or_admin(id)?;
+    let row = user::Entity::find_by_id(id)
         .one(&state.db)
         .await
         .map_err(AppError::db)?
@@ -326,8 +339,8 @@ async fn find_one(State(state): State<AppState>, Path(id): Path<String>) -> AppR
 }
 
 async fn profile(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Json<Value>> {
-    let claims = session::bearer(&headers, &state.config)?;
-    let row = user::Entity::find_by_id(parse_uuid(&claims.sub)?)
+    let actor = authorization::authenticate(&state, &headers).await?;
+    let row = user::Entity::find_by_id(actor.id)
         .one(&state.db)
         .await
         .map_err(AppError::db)?
@@ -346,9 +359,23 @@ async fn profile(State(state): State<AppState>, headers: HeaderMap) -> AppResult
 async fn update(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(input): Json<UpdateUserBody>,
+    headers: HeaderMap,
+    ApiJson(input): ApiJson<UpdateUserBody>,
 ) -> AppResult<Json<Value>> {
     let id = parse_uuid(&id)?;
+    let actor = authorization::authenticate(&state, &headers).await?;
+    actor.require_owner_or_admin(id)?;
+    if !actor.is_admin && (input.role_id.is_some() || input.is_active.is_some()) {
+        return Err(AppError::Forbidden(
+            "Only administrators can change roles or activation status".into(),
+        ));
+    }
+    // Password changes require the existing password via the dedicated endpoint.
+    if input.password.is_some() {
+        return Err(AppError::BadRequest(
+            "Use PUT /users/{id}/password to change a password".into(),
+        ));
+    }
     let row = user::Entity::find_by_id(id)
         .one(&state.db)
         .await
@@ -408,10 +435,6 @@ async fn update(
     if let Some(v) = input.birth_date {
         active.birth_date = Set(v.map(|v| parse_birth_date(&v)).transpose()?);
     }
-    if let Some(v) = input.password {
-        validate_password(&v)?;
-        active.password = Set(auth::hash_password(v).await?);
-    }
     active.updated_at = Set(Utc::now().naive_utc());
     active.update(&state.db).await.map_err(AppError::db)?;
     Ok(Json(success("updated", "User")))
@@ -420,11 +443,17 @@ async fn update(
 async fn update_password(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(input): Json<PasswordBody>,
+    headers: HeaderMap,
+    ApiJson(input): ApiJson<PasswordBody>,
 ) -> AppResult<Json<Value>> {
+    let id = parse_uuid(&id)?;
+    let actor = authorization::authenticate(&state, &headers).await?;
+    if actor.id != id {
+        return Err(AppError::Forbidden("Cannot change another user's password".into()));
+    }
     validate_password(&input.exsiting_password)?;
     validate_password(&input.new_password)?;
-    let row = user::Entity::find_by_id(parse_uuid(&id)?)
+    let row = user::Entity::find_by_id(id)
         .one(&state.db)
         .await
         .map_err(AppError::db)?
@@ -444,8 +473,16 @@ async fn update_password(
     Ok(Json(success("updated", "User Password")))
 }
 
-async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    let result = user::Entity::delete_by_id(parse_uuid(&id)?)
+async fn remove(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
+    let id = parse_uuid(&id)?;
+    authorization::authenticate(&state, &headers)
+        .await?
+        .require_owner_or_admin(id)?;
+    let result = user::Entity::delete_by_id(id)
         .exec(&state.db)
         .await
         .map_err(AppError::db)?;
@@ -456,8 +493,8 @@ async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> AppRes
 }
 
 async fn authenticate_owner(state: &AppState, headers: &HeaderMap, id: Uuid) -> AppResult<()> {
-    let claims = session::bearer(headers, &state.config)?;
-    if claims.sub != id.to_string() {
+    let actor = authorization::authenticate(state, headers).await?;
+    if actor.id != id {
         return Err(AppError::Forbidden(
             "Cannot change another user's image".into(),
         ));
@@ -469,7 +506,7 @@ async fn presign_image(
     State(state): State<AppState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Json(input): Json<PresignBody>,
+    ApiJson(input): ApiJson<PresignBody>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let id = parse_uuid(&id)?;
     authenticate_owner(&state, &headers, id).await?;
@@ -497,7 +534,9 @@ async fn presign_image(
             "Only JPEG, PNG or WebP images are supported".into(),
         ));
     }
-    let key = format!("users/{id}/{}", Uuid::new_v4());
+    // A short-lived staging key prevents clients from overwriting the finalized
+    // image using the still-valid presigned PUT URL.
+    let key = format!("pending/users/{id}/{}", Uuid::new_v4());
     let url = state
         .storage
         .presign_put(&key, &input.mime_type, input.file_size)
@@ -515,17 +554,17 @@ async fn confirm_image(
     State(state): State<AppState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Json(input): Json<ConfirmBody>,
+    ApiJson(input): ApiJson<ConfirmBody>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let id = parse_uuid(&id)?;
     authenticate_owner(&state, &headers, id).await?;
-    let prefix = format!("users/{id}/");
+    let prefix = format!("pending/users/{id}/");
     let asset_id = input
         .key
         .strip_prefix(&prefix)
         .ok_or_else(|| AppError::BadRequest("Invalid image object key".into()))?;
     parse_uuid(asset_id)?;
-    state.storage.verify_image(&input.key).await?;
+    let etag = state.storage.verify_image(&input.key).await?;
     let row = user::Entity::find_by_id(id)
         .one(&state.db)
         .await
@@ -540,11 +579,58 @@ async fn confirm_image(
             "PUBLIC_BASE_URL is too long for image_url column".into(),
         ));
     }
+    let final_key = format!("users/{id}/{asset_id}");
+    state
+        .storage
+        .copy_verified_image(&input.key, &final_key, &etag)
+        .await?;
+    let previous_key = row
+        .image_url
+        .as_deref()
+        .and_then(|value| persisted_image_key(value, id));
     let mut active: user::ActiveModel = row.into();
     active.image_url = Set(Some(image_url));
     active.updated_at = Set(Utc::now().naive_utc());
-    active.update(&state.db).await.map_err(AppError::db)?;
+    if let Err(err) = active.update(&state.db).await {
+        if let Err(cleanup_err) = state.storage.delete_image(&final_key).await {
+            tracing::warn!(error = %cleanup_err, "could not clean up failed image confirmation");
+        }
+        return Err(AppError::db(err));
+    }
+    for obsolete in [Some(input.key), previous_key].into_iter().flatten() {
+        if let Err(err) = state.storage.delete_image(&obsolete).await {
+            // The new image is committed, so failing the request would mislead the UI.
+            tracing::warn!(error = %err, object_key = obsolete, "MinIO image cleanup failed");
+        }
+    }
     Ok((StatusCode::CREATED, Json(success("updated", "User Image"))))
+}
+
+fn persisted_image_key(url: &str, user_id: Uuid) -> Option<String> {
+    let marker = format!("/media/users/{user_id}/");
+    let asset_id = url.rsplit_once(&marker)?.1;
+    Uuid::parse_str(asset_id).ok()?;
+    Some(format!("users/{user_id}/{asset_id}"))
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    #[test]
+    fn only_owned_minio_urls_are_candidates_for_cleanup() {
+        let user = Uuid::new_v4();
+        let asset = Uuid::new_v4();
+        assert_eq!(
+            persisted_image_key(&format!("https://api.example.com/media/users/{user}/{asset}"), user),
+            Some(format!("users/{user}/{asset}"))
+        );
+        assert_eq!(persisted_image_key("https://res.cloudinary.com/old.png", user), None);
+        assert_eq!(
+            persisted_image_key(&format!("https://api.example.com/media/users/{}/{asset}", Uuid::new_v4()), user),
+            None
+        );
+    }
 }
 
 pub async fn get_image(

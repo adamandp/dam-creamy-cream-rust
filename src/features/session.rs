@@ -19,9 +19,12 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
-    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub role: Option<String>,
     pub iat: usize,
     pub exp: usize,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub jti: Option<String>,
 }
 
 fn sign(config: &Config, sub: &str, role: &str, refresh: bool) -> AppResult<String> {
@@ -29,9 +32,12 @@ fn sign(config: &Config, sub: &str, role: &str, refresh: bool) -> AppResult<Stri
     let expires_in = if refresh { 7 * 24 * 60 * 60 } else { 15 * 60 };
     let claims = Claims {
         sub: sub.to_owned(),
-        role: role.to_owned(),
+        // Refresh sessions are authorized using the current role in the database.
+        // Omitting the redundant role keeps the unique jti within VARCHAR(255).
+        role: (!refresh).then(|| role.to_owned()),
         iat: now,
         exp: now + expires_in,
+        jti: refresh.then(|| uuid::Uuid::new_v4().to_string()),
     };
     let secret = if refresh {
         &config.refresh_jwt_secret
@@ -224,7 +230,18 @@ pub async fn refresh(
     let claims = valid_stored_refresh(&state, cookie_token(&jar)?).await?;
     // Legacy returns a refresh-signed JWT as accessToken. We intentionally
     // issue a real 15-minute access token so Bearer authentication works.
-    let access = create_access(&state.config, &claims.sub, &claims.role)?;
+    let user_id = uuid::Uuid::parse_str(&claims.sub)
+        .map_err(|_| AppError::Unauthorized("Invalid session subject".into()))?;
+    let current_user = user::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| AppError::Unauthorized("Account no longer exists".into()))?;
+    let access = create_access(
+        &state.config,
+        &claims.sub,
+        &current_user.role_id.to_string(),
+    )?;
     Ok((
         StatusCode::CREATED,
         Json(json!({"data": {"accessToken": access}})),
@@ -304,5 +321,41 @@ mod tests {
         )
         .unwrap();
         assert!(refresh.len() <= 255, "JWT must fit legacy VARCHAR(255)");
+        assert!(verify_refresh(&cfg, &refresh).unwrap().jti.is_some());
+        let other = sign(
+            &cfg,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+            true,
+        )
+        .unwrap();
+        assert_ne!(refresh, other);
+    }
+
+    #[test]
+    fn refresh_tokens_are_unique_even_with_identical_subject_and_second() {
+        let cfg = Config {
+            port: 3000,
+            database_url: String::new(),
+            redis_url: String::new(),
+            access_jwt_secret: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            refresh_jwt_secret: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            public_base_url: String::new(),
+            frontend_origins: vec![],
+            minio_endpoint: String::new(),
+            minio_access_key: String::new(),
+            minio_secret_key: String::new(),
+            minio_bucket: String::new(),
+            minio_region: String::new(),
+            production: false,
+        };
+        let sub = uuid::Uuid::new_v4().to_string();
+        let role = uuid::Uuid::new_v4().to_string();
+        let first = sign(&cfg, &sub, &role, true).unwrap();
+        let second = sign(&cfg, &sub, &role, true).unwrap();
+        assert_ne!(first, second);
+        assert!(first.len() <= 255);
+        assert!(second.len() <= 255);
+        assert_eq!(verify_refresh(&cfg, &first).unwrap().sub, sub);
     }
 }

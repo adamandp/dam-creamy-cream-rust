@@ -81,7 +81,7 @@ impl Storage {
         Ok(request.uri().to_string())
     }
 
-    pub async fn verify_image(&self, key: &str) -> AppResult<()> {
+    pub async fn verify_image(&self, key: &str) -> AppResult<String> {
         let object = self
             .client
             .head_object()
@@ -96,14 +96,68 @@ impl Storage {
                 "Image size must be at most 2 MiB".into(),
             ));
         }
-        if !matches!(
-            object.content_type(),
-            Some("image/jpeg" | "image/png" | "image/webp")
-        ) {
+        let mime = object.content_type().unwrap_or_default();
+        if !matches!(mime, "image/jpeg" | "image/png" | "image/webp") {
             return Err(AppError::BadRequest(
                 "Only JPEG, PNG or WebP images are supported".into(),
             ));
         }
+        let etag = object
+            .e_tag()
+            .ok_or_else(|| AppError::BadRequest("Image has no object ETag".into()))?
+            .to_owned();
+        let sample = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .range("bytes=0-63")
+            .if_match(etag.as_str())
+            .send()
+            .await
+            .map_err(|_| AppError::BadRequest("Image changed during verification".into()))?;
+        let data = sample
+            .body
+            .collect()
+            .await
+            .map_err(|_| AppError::BadRequest("Could not read image signature".into()))?
+            .into_bytes();
+        if !valid_image_signature(mime, data.as_ref()) {
+            return Err(AppError::BadRequest(
+                "Uploaded content does not match the declared image type".into(),
+            ));
+        }
+        Ok(etag)
+    }
+
+    pub async fn copy_verified_image(
+        &self,
+        source: &str,
+        destination: &str,
+        etag: &str,
+    ) -> AppResult<()> {
+        self.client
+            .copy_object()
+            .bucket(&self.bucket)
+            .key(destination)
+            .copy_source(format!("{}/{}", self.bucket, source))
+            .copy_source_if_match(etag)
+            .send()
+            .await
+            .map_err(|e| AppError::BadRequest(format!(
+                "Image changed or could not be finalized: {e}"
+            )))?;
+        Ok(())
+    }
+
+    pub async fn delete_image(&self, key: &str) -> AppResult<()> {
+        self.client
+            .delete_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| AppError::Internal(format!("MinIO delete failed: {e}")))?;
         Ok(())
     }
 
@@ -119,6 +173,46 @@ impl Storage {
             .await
             .map_err(|e| AppError::Internal(format!("MinIO presign GET failed: {e}")))?;
         Ok(request.uri().to_string())
+    }
+}
+
+fn valid_image_signature(mime: &str, data: &[u8]) -> bool {
+    match mime {
+        "image/jpeg" => data.starts_with(&[0xff, 0xd8, 0xff]),
+        "image/png" => {
+            data.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10])
+                && data.get(12..16) == Some(b"IHDR".as_slice())
+        }
+        "image/webp" => {
+            let codec = data.get(12..16);
+            data.starts_with(b"RIFF")
+                && data.get(8..12) == Some(b"WEBP".as_slice())
+                && (codec == Some(b"VP8 ".as_slice())
+                    || codec == Some(b"VP8L".as_slice())
+                    || codec == Some(b"VP8X".as_slice()))
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_image_signature;
+
+    #[test]
+    fn image_magic_bytes_must_match_declared_mime() {
+        assert!(valid_image_signature("image/jpeg", &[0xff, 0xd8, 0xff, 1]));
+        assert!(valid_image_signature(
+            "image/png",
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        ));
+        assert!(valid_image_signature(
+            "image/webp",
+            b"RIFF\x00\x00\x00\x00WEBPVP8 "
+        ));
+        assert!(!valid_image_signature("image/png", b"not a real image"));
+        assert!(!valid_image_signature("image/jpeg", b"\x89PNG\r\n\x1a\n"));
+        assert!(!valid_image_signature("image/webp", b"RIFF\x00\x00\x00\x00WEBPFAKE"));
     }
 }
 

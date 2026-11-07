@@ -2,6 +2,7 @@ pub mod common;
 pub mod config;
 pub mod entity;
 pub mod error;
+pub mod extract;
 pub mod features;
 pub mod infrastructure;
 pub mod state;
@@ -72,6 +73,7 @@ mod tests {
     use crate::{
         config::Config,
         entity::{address, role, user},
+        features::session,
         infrastructure::storage::Storage,
     };
 
@@ -135,6 +137,24 @@ mod tests {
         request_method(app, path, axum::http::Method::GET).await
     }
 
+    async fn authorized_request(app: Router, path: &str, user_id: uuid::Uuid, role_id: uuid::Uuid) -> (StatusCode, Value) {
+        let token = session::create_access(&config(), &user_id.to_string(), &role_id.to_string())
+            .unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
     #[tokio::test]
     async fn roles_retain_legacy_response_shape() {
         let now = Utc::now().naive_utc();
@@ -157,9 +177,10 @@ mod tests {
     async fn user_detail_omits_password() {
         let now = Utc::now().naive_utc();
         let id = uuid::Uuid::new_v4();
+        let role_id = uuid::Uuid::new_v4();
         let model = user::Model {
             id,
-            role_id: uuid::Uuid::new_v4(),
+            role_id,
             username: "DummyUser".into(),
             email: None,
             phone_number: None,
@@ -172,15 +193,30 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let (status, body) =
-            request(app_with_queries(vec![vec![model]]), &format!("/users/{id}")).await;
+        let role = role::Model {
+            id: role_id,
+            name: "customer".into(),
+            created_at: now,
+            updated_at: now,
+        };
+        let app = router(AppState {
+            db: MockDatabase::new(DbBackend::Postgres)
+                .append_query_results(vec![vec![model.clone()]])
+                .append_query_results(vec![vec![role]])
+                .append_query_results(vec![vec![model]])
+                .into_connection(),
+            redis: redis::Client::open(config().redis_url.clone()).unwrap(),
+            storage: Storage::offline(&config()),
+            config: config(),
+        });
+        let (status, body) = authorized_request(app, &format!("/users/{id}"), id, role_id).await;
         assert_eq!(status, StatusCode::OK);
         assert!(body["data"].get("password").is_none());
         assert_eq!(body["data"]["fullName"], "Dummy User");
     }
 
     #[tokio::test]
-    async fn address_detail_maps_snake_case_columns_to_json_contract() {
+    async fn anonymous_cannot_read_another_users_address() {
         let now = Utc::now().naive_utc();
         let id = uuid::Uuid::new_v4();
         let model = address::Model {
@@ -203,9 +239,8 @@ mod tests {
             &format!("/addresses/{id}"),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["data"]["recipientPhoneNumber"], "081234567890");
-        assert_eq!(body["data"]["isPrimary"], true);
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["statusCode"], 401);
     }
 
     #[tokio::test]
@@ -229,5 +264,51 @@ mod tests {
                 "collection route missing: {path}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn invalid_json_and_query_parameters_use_json_error_envelopes() {
+        let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
+        let invalid_body = app.clone().oneshot(
+            Request::builder()
+                .method(axum::http::Method::POST)
+                .uri("/roles")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":123}"#))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(invalid_body.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(invalid_body.into_body(), 4096).await.unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["statusCode"], 400);
+
+        let (status, value) = request(app, "/roles?page=not-a-number").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["statusCode"], 400);
+    }
+
+    #[tokio::test]
+    async fn mutations_without_authentication_are_rejected() {
+        let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
+        let id = uuid::Uuid::new_v4();
+        let update = app.clone().oneshot(
+            Request::builder()
+                .method(axum::http::Method::PATCH)
+                .uri(format!("/users/{id}"))
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"isActive":true}"#))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(update.status(), StatusCode::UNAUTHORIZED);
+
+        let create_role = app.oneshot(
+            Request::builder()
+                .method(axum::http::Method::POST)
+                .uri("/roles")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"root"}"#))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(create_role.status(), StatusCode::UNAUTHORIZED);
     }
 }

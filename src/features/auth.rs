@@ -63,6 +63,9 @@ async fn dummy_login(
     jar: CookieJar,
     headers: HeaderMap,
 ) -> AppResult<(CookieJar, (StatusCode, Json<Value>))> {
+    if state.config.production {
+        return Err(AppError::NotFound("Dummy login is disabled in production".into()));
+    }
     let user = user::Entity::find()
         .filter(user::Column::Username.eq("DummyUser"))
         .one(&state.db)
