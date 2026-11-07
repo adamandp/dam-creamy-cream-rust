@@ -657,10 +657,7 @@ async fn presign_image(
     // A short-lived staging key prevents clients from overwriting the finalized
     // image using the still-valid presigned PUT URL.
     let key = format!("pending/users/{id}/{}", Uuid::new_v4());
-    let url = state
-        .storage
-        .presign_put(&key, &input.mime_type)
-        .await?;
+    let url = state.storage.presign_put(&key, &input.mime_type).await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -812,9 +809,16 @@ mod image_tests {
         let pending = "pending/users/owner/asset".to_owned();
         let current = "users/owner/asset".to_owned();
         let previous = Some(current.clone());
-        assert_eq!(obsolete_image_keys(pending.clone(), previous, &current), vec![pending]);
         assert_eq!(
-            obsolete_image_keys("pending/another".into(), Some("users/previous".into()), &current),
+            obsolete_image_keys(pending.clone(), previous, &current),
+            vec![pending]
+        );
+        assert_eq!(
+            obsolete_image_keys(
+                "pending/another".into(),
+                Some("users/previous".into()),
+                &current
+            ),
             vec!["pending/another", "users/previous"]
         );
     }

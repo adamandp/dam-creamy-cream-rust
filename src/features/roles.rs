@@ -137,9 +137,7 @@ async fn update(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Role"))?;
-    if body.name != model.name
-        && (is_builtin_role(&body.name) || is_builtin_role(&model.name))
-    {
+    if body.name != model.name && (is_builtin_role(&body.name) || is_builtin_role(&model.name)) {
         return Err(AppError::Forbidden(
             "Built-in role names cannot be changed".into(),
         ));

@@ -853,7 +853,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/addresses/user")
-                    .header(axum::http::header::COOKIE, format!("refreshToken={refresh_token}"))
+                    .header(
+                        axum::http::header::COOKIE,
+                        format!("refreshToken={refresh_token}"),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
