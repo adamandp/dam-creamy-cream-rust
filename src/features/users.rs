@@ -102,7 +102,23 @@ pub fn routes() -> Router<AppState> {
         .route("/{id}/image/confirm", axum::routing::post(confirm_image))
 }
 
-fn body(model: user::Model) -> Value {
+fn current_image_url(stored: Option<String>, user_id: Uuid, public_base_url: &str) -> Option<String> {
+    match stored {
+        Some(url) => {
+            if let Some(key) = persisted_image_key(&url, user_id) {
+                let asset = key.rsplit('/').next()?;
+                Some(format!("{public_base_url}/media/users/{user_id}/{asset}"))
+            } else {
+                // Legacy external image URLs remain untouched.
+                Some(url)
+            }
+        }
+        None => None,
+    }
+}
+
+fn body(model: user::Model, public_base_url: &str) -> Value {
+    let image_url = current_image_url(model.image_url, model.id, public_base_url);
     json!({
         "id": model.id,
         "roleId": model.role_id,
@@ -111,7 +127,7 @@ fn body(model: user::Model) -> Value {
         "phoneNumber": model.phone_number,
         "fullName": model.full_name,
         "birthDate": model.birth_date.map(date),
-        "imageUrl": model.image_url,
+        "imageUrl": image_url,
         "gender": model.gender,
         "isActive": model.is_active,
         "createdAt": date_time(model.created_at),
@@ -314,7 +330,7 @@ async fn find_all(
         .map_err(AppError::db)?;
     Ok(Json(json!({
         "message": success_verb("retrieved", "User"),
-        "data": rows.into_iter().map(body).collect::<Vec<_>>(),
+        "data": rows.into_iter().map(|row| body(row, &state.config.public_base_url)).collect::<Vec<_>>(),
         "paging": paging(page, limit, total),
     })))
 }
@@ -334,7 +350,7 @@ async fn find_one(
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
     Ok(Json(
-        json!({"message": success_verb("retrieved", "User"), "data": body(row)}),
+        json!({"message": success_verb("retrieved", "User"), "data": body(row, &state.config.public_base_url)}),
     ))
 }
 
@@ -345,7 +361,7 @@ async fn profile(State(state): State<AppState>, headers: HeaderMap) -> AppResult
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
-    let mut profile = body(row);
+    let mut profile = body(row, &state.config.public_base_url);
     for name in ["id", "roleId", "isActive", "createdAt", "updatedAt"] {
         if let Some(obj) = profile.as_object_mut() {
             obj.remove(name);
@@ -539,6 +555,13 @@ async fn remove(
     let id = parse_uuid(&id)?;
     let actor = authorization::authenticate(&state, &headers).await?;
     actor.require_owner_or_admin(id)?;
+    if actor.is_super_admin && actor.id == id {
+        // Retain an administrative recovery path even when this is the only
+        // remaining super-administrator account.
+        return Err(AppError::Forbidden(
+            "Super administrators cannot delete their own account".into(),
+        ));
+    }
     let tx = state.db.begin().await.map_err(AppError::db)?;
     let row = user::Entity::find_by_id(id)
         .lock_exclusive()
@@ -657,7 +680,10 @@ async fn presign_image(
     // A short-lived staging key prevents clients from overwriting the finalized
     // image using the still-valid presigned PUT URL.
     let key = format!("pending/users/{id}/{}", Uuid::new_v4());
-    let url = state.storage.presign_put(&key, &input.mime_type).await?;
+    let url = state
+        .storage
+        .presign_put(&key, &input.mime_type, input.file_size)
+        .await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -698,7 +724,13 @@ async fn confirm_image(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
-    if existing_user.image_url.as_deref() == Some(image_url.as_str()) {
+    if existing_user
+        .image_url
+        .as_deref()
+        .and_then(|value| persisted_image_key(value, id))
+        .as_deref()
+        == Some(final_key.as_str())
+    {
         return Ok((StatusCode::CREATED, Json(success("updated", "User Image"))));
     }
     let etag = state.storage.verify_image(&input.key).await?;
@@ -712,7 +744,13 @@ async fn confirm_image(
             .await
             .map_err(AppError::db)?
             .ok_or_else(|| not_found("User"))?;
-        if row.image_url.as_deref() == Some(image_url.as_str()) {
+        if row
+            .image_url
+            .as_deref()
+            .and_then(|value| persisted_image_key(value, id))
+            .as_deref()
+            == Some(final_key.as_str())
+        {
             tx.commit().await.map_err(AppError::db)?;
             return Ok(None);
         }
@@ -740,7 +778,13 @@ async fn confirm_image(
                 .await
                 .ok()
                 .flatten()
-                .is_some_and(|user| user.image_url.as_deref() == Some(image_url.as_str()));
+                .is_some_and(|user| {
+                    user.image_url
+                        .as_deref()
+                        .and_then(|value| persisted_image_key(value, id))
+                        .as_deref()
+                        == Some(final_key.as_str())
+                });
             if !currently_referenced
                 && let Err(cleanup_err) = state.storage.delete_image(&final_key).await
             {
@@ -805,6 +849,25 @@ mod image_tests {
     }
 
     #[test]
+    fn existing_minio_images_follow_the_current_api_origin() {
+        let user = Uuid::new_v4();
+        let asset = Uuid::new_v4();
+        let old = format!("https://old.example.com/media/users/{user}/{asset}");
+        assert_eq!(
+            current_image_url(Some(old), user, "https://new.example.com"),
+            Some(format!("https://new.example.com/media/users/{user}/{asset}"))
+        );
+        assert_eq!(
+            current_image_url(
+                Some("https://res.cloudinary.com/legacy.png".into()),
+                user,
+                "https://new.example.com"
+            ),
+            Some("https://res.cloudinary.com/legacy.png".into())
+        );
+    }
+
+    #[test]
     fn duplicate_image_confirmation_never_deletes_current_image() {
         let pending = "pending/users/owner/asset".to_owned();
         let current = "users/owner/asset".to_owned();
@@ -835,8 +898,14 @@ pub async fn get_image(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
-    let expected = format!("{}/media/users/{id}/{asset}", state.config.public_base_url);
-    if row.image_url.as_deref() != Some(expected.as_str()) {
+    let expected = format!("users/{id}/{asset}");
+    if row
+        .image_url
+        .as_deref()
+        .and_then(|value| persisted_image_key(value, id))
+        .as_deref()
+        != Some(expected.as_str())
+    {
         return Err(not_found("User Image"));
     }
     let url = state

@@ -119,41 +119,47 @@ async fn dummy_login(
 async fn logout(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> AppResult<(CookieJar, (StatusCode, Json<Value>))> {
+) -> (CookieJar, AppResult<(StatusCode, Json<Value>)>) {
     let token = jar
         .get("refreshToken")
         .map(|v| v.value())
         .unwrap_or_default()
         .to_owned();
-    session::clear_token(&state, &token).await?;
-    Ok((
-        jar.remove(Cookie::build("refreshToken").path("/").build()),
+    let result = session::clear_token(&state, &token).await.map(|_| {
         (
             StatusCode::CREATED,
             Json(json!({"message": "🎉 You have logged out successfully! see u lateer"})),
-        ),
-    ))
+        )
+    });
+    // Always expire the browser's HTTP-only cookie, including on an expired,
+    // revoked or otherwise invalid refresh token. Preserve the error status.
+    (
+        jar.remove(Cookie::build("refreshToken").path("/").build()),
+        result,
+    )
 }
 
 async fn logout_all(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> AppResult<(CookieJar, (StatusCode, Json<Value>))> {
+) -> (CookieJar, AppResult<(StatusCode, Json<Value>)>) {
     let token = jar
         .get("refreshToken")
         .map(|v| v.value())
         .unwrap_or_default()
         .to_owned();
-    session::clear_all(&state, &token).await?;
-    Ok((
-        jar.remove(Cookie::build("refreshToken").path("/").build()),
+    let result = session::clear_all(&state, &token).await.map(|_| {
         (
             StatusCode::CREATED,
             Json(
                 json!({"message": "🎉 You have logged out all sessions successfully! see u lateer"}),
             ),
-        ),
-    ))
+        )
+    });
+    (
+        jar.remove(Cookie::build("refreshToken").path("/").build()),
+        result,
+    )
 }
 
 #[cfg(test)]

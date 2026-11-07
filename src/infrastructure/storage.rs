@@ -65,7 +65,7 @@ impl Storage {
         Ok(storage)
     }
 
-    pub async fn presign_put(&self, key: &str, mime: &str) -> AppResult<String> {
+    pub async fn presign_put(&self, key: &str, mime: &str, size: i64) -> AppResult<String> {
         let config = PresigningConfig::expires_in(Duration::from_secs(10 * 60))
             .map_err(|e| AppError::Internal(e.to_string()))?;
         let request = self
@@ -74,6 +74,10 @@ impl Storage {
             .bucket(&self.bucket)
             .key(key)
             .content_type(mime)
+            // The browser sets Content-Length itself for a File/Blob body.
+            // Signing its exact value prevents a forged fileSize from turning
+            // this presigned URL into an unbounded MinIO upload.
+            .content_length(size)
             .presigned(config)
             .await
             .map_err(|e| AppError::Internal(format!("MinIO presign PUT failed: {e}")))?;
@@ -283,12 +287,12 @@ mod tests {
             production: false,
         };
         let signed = Storage::offline(&config)
-            .presign_put("users/example/photo", "image/webp")
+            .presign_put("users/example/photo", "image/webp", 1024)
             .await
             .unwrap();
         assert!(signed.contains("X-Amz-Signature="));
         assert!(signed.contains("X-Amz-SignedHeaders="));
-        assert!(!signed.contains("content-length"));
+        assert!(signed.contains("content-length"));
         assert!(signed.contains("content-type"));
     }
 

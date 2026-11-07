@@ -265,6 +265,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logout_clears_revoked_refresh_cookies_even_on_unauthorized() {
+        let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
+        for path in ["/auth/logout", "/auth/logout-all"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(axum::http::Method::POST)
+                        .uri(path)
+                        .header(axum::http::header::COOKIE, "refreshToken=invalid")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            let cookie = response
+                .headers()
+                .get(axum::http::header::SET_COOKIE)
+                .expect("logout must expire revoked refresh cookies")
+                .to_str()
+                .unwrap();
+            assert!(cookie.contains("refreshToken="), "{cookie}");
+            assert!(cookie.contains("Max-Age=0"), "{cookie}");
+        }
+    }
+
+    #[tokio::test]
     async fn collection_routes_accept_paths_without_trailing_slash() {
         let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
         for path in ["/roles", "/users", "/addresses"] {
@@ -500,6 +528,25 @@ mod tests {
             )
             .await,
             StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::DELETE,
+                format!("/users/{root}"),
+                root_token.clone(),
+                json!({}),
+            )
+            .await,
+            StatusCode::FORBIDDEN,
+            "super-admin must not be able to delete the last admin account",
+        );
+        assert!(
+            user::Entity::find_by_id(root)
+                .one(&db)
+                .await
+                .unwrap()
+                .is_some()
         );
         assert_eq!(
             send_json(
