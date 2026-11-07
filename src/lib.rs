@@ -66,8 +66,11 @@ mod tests {
         http::{Request, StatusCode},
     };
     use chrono::Utc;
-    use sea_orm::{DbBackend, MockDatabase};
-    use serde_json::Value;
+    use sea_orm::{
+        ActiveModelTrait, ActiveValue::Set, ColumnTrait, Database, DbBackend, EntityTrait,
+        MockDatabase, QueryFilter, Statement,
+    };
+    use serde_json::{Value, json};
     use tower::ServiceExt;
 
     use crate::{
@@ -329,5 +332,155 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(create_role.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    async fn send_json(
+        app: Router,
+        method: axum::http::Method,
+        path: String,
+        token: String,
+        body: Value,
+    ) -> StatusCode {
+        app.oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+    }
+
+    // Runs against the isolated PostgreSQL service in CI. Does not create or
+    // migrate tables in any application database.
+    #[tokio::test]
+    async fn postgres_authorization_and_primary_address_invariants() {
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            return;
+        };
+        let db = Database::connect(url).await.unwrap();
+        for ddl in [
+            "CREATE TYPE \"GENDER_TYPE\" AS ENUM ('MALE', 'FEMALE', 'OTHER')",
+            "CREATE TABLE roles (id UUID PRIMARY KEY, name VARCHAR(50) UNIQUE NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+            "CREATE TABLE users (id UUID PRIMARY KEY, role_id UUID NOT NULL REFERENCES roles(id), username VARCHAR(50) UNIQUE NOT NULL, email VARCHAR(255), phone_number VARCHAR(100), password VARCHAR(255) NOT NULL, full_name VARCHAR(100) NOT NULL, birth_date DATE, image_url VARCHAR(255), gender \"GENDER_TYPE\", is_active BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+            "CREATE TABLE addresses (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), recipient_name VARCHAR(100) NOT NULL, recipient_phone_number VARCHAR(100) NOT NULL, province VARCHAR(100) NOT NULL, city VARCHAR(100) NOT NULL, subdistrict VARCHAR(100) NOT NULL, village VARCHAR(100) NOT NULL, postal_code VARCHAR(100) NOT NULL, address VARCHAR(100) NOT NULL, is_primary BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+        ] {
+            db.execute(Statement::from_string(DbBackend::Postgres, ddl.to_owned()))
+                .await
+                .unwrap();
+        }
+        let now = Utc::now().naive_utc();
+        let customer_role = uuid::Uuid::new_v4();
+        let admin_role = uuid::Uuid::new_v4();
+        for (id, name) in [(customer_role, "customer"), (admin_role, "admin")] {
+            role::ActiveModel {
+                id: Set(id),
+                name: Set(name.to_owned()),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&db)
+            .await
+            .unwrap();
+        }
+        let owner = uuid::Uuid::new_v4();
+        let stranger = uuid::Uuid::new_v4();
+        let administrator = uuid::Uuid::new_v4();
+        for (id, role_id, username) in [
+            (owner, customer_role, "integrationowner"),
+            (stranger, customer_role, "integrationstranger"),
+            (administrator, admin_role, "integrationadmin"),
+        ] {
+            user::ActiveModel {
+                id: Set(id),
+                role_id: Set(role_id),
+                username: Set(username.to_owned()),
+                email: Set(None),
+                phone_number: Set(None),
+                password: Set("unused-hash".to_owned()),
+                full_name: Set("Test User".to_owned()),
+                birth_date: Set(None),
+                image_url: Set(None),
+                gender: Set(None),
+                is_active: Set(true),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&db)
+            .await
+            .unwrap();
+        }
+        let cfg = config();
+        let token_for = |id: uuid::Uuid, role_id: uuid::Uuid| {
+            session::create_access(&cfg, &id.to_string(), &role_id.to_string()).unwrap()
+        };
+        let owner_token = token_for(owner, customer_role);
+        let stranger_token = token_for(stranger, customer_role);
+        let admin_token = token_for(administrator, admin_role);
+        let app = router(AppState {
+            db: db.clone(),
+            redis: redis::Client::open(cfg.redis_url.clone()).unwrap(),
+            storage: Storage::offline(&cfg),
+            config: cfg,
+        });
+
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/users/{owner}"), stranger_token.clone(), json!({"roleId": admin_role})).await, StatusCode::FORBIDDEN);
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/users/{owner}"), owner_token.clone(), json!({"roleId": admin_role})).await, StatusCode::FORBIDDEN);
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/users/{owner}"), owner_token.clone(), json!({"password": "Password123!"})).await, StatusCode::BAD_REQUEST);
+        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/roles".into(), admin_token.clone(), json!({"name": "privileged"})).await, StatusCode::FORBIDDEN);
+
+        let address_body = |recipient: &str, primary: bool| json!({
+            "userId": owner,
+            "recipientName": recipient,
+            "recipientPhoneNumber": "081234567890",
+            "province": "Banten",
+            "city": "Tangerang",
+            "subdistrict": "Serpong",
+            "village": "Lengkong",
+            "postalCode": "15310",
+            "address": "Street One",
+            "isPrimary": primary
+        });
+        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/addresses".into(), owner_token.clone(), address_body("First", false)).await, StatusCode::CREATED);
+        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/addresses".into(), owner_token.clone(), address_body("Second", true)).await, StatusCode::CREATED);
+        let rows = address::Entity::find()
+            .filter(address::Column::UserId.eq(owner))
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
+        let first = rows.iter().find(|address| address.recipient_name == "First").unwrap().id;
+        let second = rows.iter().find(|address| address.recipient_name == "Second").unwrap().id;
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), owner_token.clone(), json!({"isPrimary": true})).await, StatusCode::OK);
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), owner_token.clone(), json!({"isPrimary": false})).await, StatusCode::OK);
+        let second_row = address::Entity::find_by_id(second).one(&db).await.unwrap().unwrap();
+        assert!(second_row.is_primary);
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), stranger_token.clone(), json!({"city": "Bandung"})).await, StatusCode::FORBIDDEN);
+        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/addresses".into(), stranger_token.clone(), address_body("Third", true)).await, StatusCode::FORBIDDEN);
+        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), admin_token.clone(), json!({"userId": stranger})).await, StatusCode::OK);
+        assert_eq!(address::Entity::find_by_id(first).one(&db).await.unwrap().unwrap().user_id, stranger);
+        assert!(address::Entity::find_by_id(first).one(&db).await.unwrap().unwrap().is_primary);
+        assert!(address::Entity::find_by_id(second).one(&db).await.unwrap().unwrap().is_primary);
+        assert_eq!(send_json(app.clone(), axum::http::Method::DELETE, format!("/addresses/{first}"), stranger_token.clone(), json!({})).await, StatusCode::CONFLICT);
+
+        let mut simultaneous = Vec::new();
+        for _ in 0..6 {
+            simultaneous.push(tokio::spawn(send_json(
+                app.clone(),
+                axum::http::Method::POST,
+                "/addresses".into(),
+                owner_token.clone(),
+                address_body("Extra", true),
+            )));
+        }
+        for request in simultaneous {
+            assert_eq!(request.await.unwrap(), StatusCode::CREATED);
+        }
+        let rows = address::Entity::find().filter(address::Column::UserId.eq(owner)).all(&db).await.unwrap();
+        assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
     }
 }
