@@ -102,7 +102,11 @@ pub fn routes() -> Router<AppState> {
         .route("/{id}/image/confirm", axum::routing::post(confirm_image))
 }
 
-fn current_image_url(stored: Option<String>, user_id: Uuid, public_base_url: &str) -> Option<String> {
+fn current_image_url(
+    stored: Option<String>,
+    user_id: Uuid,
+    public_base_url: &str,
+) -> Option<String> {
     match stored {
         Some(url) => {
             if let Some(key) = persisted_image_key(&url, user_id) {
@@ -855,7 +859,9 @@ mod image_tests {
         let old = format!("https://old.example.com/media/users/{user}/{asset}");
         assert_eq!(
             current_image_url(Some(old), user, "https://new.example.com"),
-            Some(format!("https://new.example.com/media/users/{user}/{asset}"))
+            Some(format!(
+                "https://new.example.com/media/users/{user}/{asset}"
+            ))
         );
         assert_eq!(
             current_image_url(
