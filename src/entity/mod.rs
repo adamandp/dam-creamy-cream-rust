@@ -1,5 +1,15 @@
 pub mod address;
 pub mod cart;
+pub mod category;
+pub mod discount;
+pub mod inventory;
+pub mod order_item;
+pub mod product;
+pub mod product_discount;
+pub mod product_information;
+pub mod review;
 pub mod role;
 pub mod user;
 pub mod user_token;
+pub mod user_voucher;
+pub mod voucher;

@@ -1,6 +1,16 @@
 pub mod addresses;
 pub mod auth;
 pub mod authorization;
+pub mod catalog_common;
+pub mod categories;
+pub mod discounts;
+pub mod inventory;
+pub mod product;
+pub mod product_discounts;
+pub mod products;
+pub mod reviews;
 pub mod roles;
 pub mod session;
 pub mod users;
+pub mod user_vouchers;
+pub mod vouchers;
