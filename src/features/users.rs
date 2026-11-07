@@ -376,8 +376,10 @@ async fn update(
             "Use PUT /users/{id}/password to change a password".into(),
         ));
     }
+    let tx = state.db.begin().await.map_err(AppError::db)?;
     let row = user::Entity::find_by_id(id)
-        .one(&state.db)
+        .lock_exclusive()
+        .one(&tx)
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
@@ -395,7 +397,7 @@ async fn update(
     // super-administrator account, even through non-role fields.
     if !actor.is_super_admin && actor.id != id {
         let target_role = role::Entity::find_by_id(row.role_id)
-            .one(&state.db)
+            .one(&tx)
             .await
             .map_err(AppError::db)?;
         if target_role.is_some_and(|role| role.name == "super-admin") {
@@ -459,7 +461,18 @@ async fn update(
         active.birth_date = Set(v.map(|v| parse_birth_date(&v)).transpose()?);
     }
     active.updated_at = Set(Utc::now().naive_utc());
-    active.update(&state.db).await.map_err(AppError::db)?;
+    active.update(&tx).await.map_err(AppError::db)?;
+    // Disabling an account or changing its role must also invalidate its
+    // existing refresh cookies. Otherwise a disabled-then-enabled account
+    // could silently resurrect previously issued sessions.
+    if input.role_id.is_some() || input.is_active == Some(false) {
+        user_token::Entity::delete_many()
+            .filter(user_token::Column::UserId.eq(id))
+            .exec(&tx)
+            .await
+            .map_err(AppError::db)?;
+    }
+    tx.commit().await.map_err(AppError::db)?;
     Ok(Json(success("updated", "User")))
 }
 

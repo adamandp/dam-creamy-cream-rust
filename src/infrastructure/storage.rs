@@ -208,17 +208,18 @@ fn valid_image(mime: &str, data: &[u8]) -> bool {
         _ => return false,
     };
     let mut reader = image::ImageReader::with_format(Cursor::new(data), format);
-    reader.limits(image::Limits {
-        max_image_width: Some(4096),
-        max_image_height: Some(4096),
-        max_alloc: Some(32 * 1024 * 1024),
-        ..image::Limits::default()
-    });
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(32 * 1024 * 1024);
+    reader.limits(limits);
     reader.decode().is_ok()
 }
 
 #[cfg(test)]
 mod signature_tests {
+    use std::io::Cursor;
+
     use super::{valid_image, valid_image_signature};
 
     #[test]

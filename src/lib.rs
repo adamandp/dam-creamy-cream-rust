@@ -795,14 +795,17 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut inactive_row: user::ActiveModel = user::Entity::find_by_id(inactive)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap()
-            .into();
-        inactive_row.is_active = Set(false);
-        inactive_row.update(&db).await.unwrap();
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/users/{inactive}"),
+                admin_token.clone(),
+                json!({"isActive": false}),
+            )
+            .await,
+            StatusCode::OK
+        );
         assert_eq!(
             authorized_request(app.clone(), "/users/profile", inactive, customer_role)
                 .await
@@ -825,6 +828,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            user_token::Entity::find()
+                .filter(user_token::Column::UserId.eq(inactive))
+                .all(&db)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/users/{inactive}"),
+                admin_token.clone(),
+                json!({"isActive": true}),
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert!(matches!(
+            session::valid_stored_refresh(&runtime, &refresh_token).await,
+            Err(crate::error::AppError::Unauthorized(_))
+        ));
 
         // A password update atomically revokes every existing refresh session.
         let mut password_user: user::ActiveModel = user::Entity::find_by_id(root)
