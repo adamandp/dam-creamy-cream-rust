@@ -55,7 +55,9 @@ impl Config {
             return Err("FRONTEND_ORIGINS is required in production".to_owned());
         }
         if production && !minio_endpoint.starts_with("https://") {
-            return Err("MINIO_ENDPOINT must use HTTPS for browser uploads in production".to_owned());
+            return Err(
+                "MINIO_ENDPOINT must use HTTPS for browser uploads in production".to_owned(),
+            );
         }
         Ok(Self {
             port,

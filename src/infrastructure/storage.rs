@@ -144,9 +144,9 @@ impl Storage {
             .copy_source_if_match(etag)
             .send()
             .await
-            .map_err(|e| AppError::BadRequest(format!(
-                "Image changed or could not be finalized: {e}"
-            )))?;
+            .map_err(|e| {
+                AppError::BadRequest(format!("Image changed or could not be finalized: {e}"))
+            })?;
         Ok(())
     }
 
@@ -212,7 +212,10 @@ mod tests {
         ));
         assert!(!valid_image_signature("image/png", b"not a real image"));
         assert!(!valid_image_signature("image/jpeg", b"\x89PNG\r\n\x1a\n"));
-        assert!(!valid_image_signature("image/webp", b"RIFF\x00\x00\x00\x00WEBPFAKE"));
+        assert!(!valid_image_signature(
+            "image/webp",
+            b"RIFF\x00\x00\x00\x00WEBPFAKE"
+        ));
     }
 }
 

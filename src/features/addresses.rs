@@ -7,8 +7,8 @@ use axum::{
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait, DatabaseTransaction,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -135,7 +135,12 @@ async fn normalize_primary(
     }
     let primary_id = preferred
         .filter(|id| addresses.iter().any(|item| item.id == *id))
-        .or_else(|| addresses.iter().find(|item| item.is_primary).map(|item| item.id))
+        .or_else(|| {
+            addresses
+                .iter()
+                .find(|item| item.is_primary)
+                .map(|item| item.id)
+        })
         .unwrap_or(addresses[0].id);
     address::Entity::update_many()
         .col_expr(address::Column::IsPrimary, false.into())
@@ -319,7 +324,9 @@ async fn update(
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Address"))?;
     if model.user_id != initial.user_id {
-        return Err(AppError::Conflict("Address changed concurrently; retry".into()));
+        return Err(AppError::Conflict(
+            "Address changed concurrently; retry".into(),
+        ));
     }
     let moving = target_user_id != initial.user_id;
     let destination_count = if moving {
@@ -430,7 +437,9 @@ async fn remove(
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Address"))?;
     if model.user_id != initial.user_id {
-        return Err(AppError::Conflict("Address changed concurrently; retry".into()));
+        return Err(AppError::Conflict(
+            "Address changed concurrently; retry".into(),
+        ));
     }
     let total = address::Entity::find()
         .filter(address::Column::UserId.eq(model.user_id))

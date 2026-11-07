@@ -449,7 +449,9 @@ async fn update_password(
     let id = parse_uuid(&id)?;
     let actor = authorization::authenticate(&state, &headers).await?;
     if actor.id != id {
-        return Err(AppError::Forbidden("Cannot change another user's password".into()));
+        return Err(AppError::Forbidden(
+            "Cannot change another user's password".into(),
+        ));
     }
     validate_password(&input.exsiting_password)?;
     validate_password(&input.new_password)?;
@@ -622,12 +624,24 @@ mod image_tests {
         let user = Uuid::new_v4();
         let asset = Uuid::new_v4();
         assert_eq!(
-            persisted_image_key(&format!("https://api.example.com/media/users/{user}/{asset}"), user),
+            persisted_image_key(
+                &format!("https://api.example.com/media/users/{user}/{asset}"),
+                user
+            ),
             Some(format!("users/{user}/{asset}"))
         );
-        assert_eq!(persisted_image_key("https://res.cloudinary.com/old.png", user), None);
         assert_eq!(
-            persisted_image_key(&format!("https://api.example.com/media/users/{}/{asset}", Uuid::new_v4()), user),
+            persisted_image_key("https://res.cloudinary.com/old.png", user),
+            None
+        );
+        assert_eq!(
+            persisted_image_key(
+                &format!(
+                    "https://api.example.com/media/users/{}/{asset}",
+                    Uuid::new_v4()
+                ),
+                user
+            ),
             None
         );
     }

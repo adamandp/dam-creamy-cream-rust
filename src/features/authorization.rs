@@ -25,7 +25,9 @@ impl Actor {
         if self.owns_or_administers(user_id) {
             Ok(())
         } else {
-            Err(AppError::Forbidden("Cannot access another user's resources".into()))
+            Err(AppError::Forbidden(
+                "Cannot access another user's resources".into(),
+            ))
         }
     }
 
@@ -41,7 +43,9 @@ impl Actor {
         if self.is_super_admin {
             Ok(())
         } else {
-            Err(AppError::Forbidden("Super administrator access required".into()))
+            Err(AppError::Forbidden(
+                "Super administrator access required".into(),
+            ))
         }
     }
 }
@@ -81,9 +85,15 @@ mod tests {
             is_super_admin: false,
         };
         assert!(actor.require_owner_or_admin(actor.id).is_ok());
-        assert!(matches!(actor.require_owner_or_admin(Uuid::new_v4()), Err(AppError::Forbidden(_))));
+        assert!(matches!(
+            actor.require_owner_or_admin(Uuid::new_v4()),
+            Err(AppError::Forbidden(_))
+        ));
         assert!(matches!(actor.require_admin(), Err(AppError::Forbidden(_))));
-        assert!(matches!(actor.require_super_admin(), Err(AppError::Forbidden(_))));
+        assert!(matches!(
+            actor.require_super_admin(),
+            Err(AppError::Forbidden(_))
+        ));
     }
 
     #[test]
@@ -96,7 +106,10 @@ mod tests {
         assert!(admin.require_admin().is_ok());
         assert!(admin.require_super_admin().is_err());
         assert!(admin.require_owner_or_admin(Uuid::new_v4()).is_ok());
-        let root = Actor { is_super_admin: true, ..admin };
+        let root = Actor {
+            is_super_admin: true,
+            ..admin
+        };
         assert!(root.require_super_admin().is_ok());
     }
 }

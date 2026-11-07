@@ -137,9 +137,14 @@ mod tests {
         request_method(app, path, axum::http::Method::GET).await
     }
 
-    async fn authorized_request(app: Router, path: &str, user_id: uuid::Uuid, role_id: uuid::Uuid) -> (StatusCode, Value) {
-        let token = session::create_access(&config(), &user_id.to_string(), &role_id.to_string())
-            .unwrap();
+    async fn authorized_request(
+        app: Router,
+        path: &str,
+        user_id: uuid::Uuid,
+        role_id: uuid::Uuid,
+    ) -> (StatusCode, Value) {
+        let token =
+            session::create_access(&config(), &user_id.to_string(), &role_id.to_string()).unwrap();
         let response = app
             .oneshot(
                 Request::builder()
@@ -152,7 +157,10 @@ mod tests {
             .unwrap();
         let status = response.status();
         let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     #[tokio::test]
@@ -269,14 +277,18 @@ mod tests {
     #[tokio::test]
     async fn invalid_json_and_query_parameters_use_json_error_envelopes() {
         let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
-        let invalid_body = app.clone().oneshot(
-            Request::builder()
-                .method(axum::http::Method::POST)
-                .uri("/roles")
-                .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"name":123}"#))
-                .unwrap(),
-        ).await.unwrap();
+        let invalid_body = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri("/roles")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":123}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(invalid_body.status(), StatusCode::BAD_REQUEST);
         let body = to_bytes(invalid_body.into_body(), 4096).await.unwrap();
         let value: Value = serde_json::from_slice(&body).unwrap();
@@ -291,24 +303,31 @@ mod tests {
     async fn mutations_without_authentication_are_rejected() {
         let app = app_with_queries::<role::Model, _>(Vec::<Vec<role::Model>>::new());
         let id = uuid::Uuid::new_v4();
-        let update = app.clone().oneshot(
-            Request::builder()
-                .method(axum::http::Method::PATCH)
-                .uri(format!("/users/{id}"))
-                .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"isActive":true}"#))
-                .unwrap(),
-        ).await.unwrap();
+        let update = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::PATCH)
+                    .uri(format!("/users/{id}"))
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"isActive":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(update.status(), StatusCode::UNAUTHORIZED);
 
-        let create_role = app.oneshot(
-            Request::builder()
-                .method(axum::http::Method::POST)
-                .uri("/roles")
-                .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"name":"root"}"#))
-                .unwrap(),
-        ).await.unwrap();
+        let create_role = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri("/roles")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"root"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(create_role.status(), StatusCode::UNAUTHORIZED);
     }
 }
