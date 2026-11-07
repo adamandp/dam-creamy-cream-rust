@@ -362,6 +362,12 @@ mod tests {
         let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
             return;
         };
+        assert!(
+            url.split('?')
+                .next()
+                .is_some_and(|value| value.ends_with("/creamy_cream_test")),
+            "integration test may only touch the disposable creamy_cream_test database"
+        );
         let db = Database::connect(url).await.unwrap();
         for ddl in [
             "CREATE TYPE \"GENDER_TYPE\" AS ENUM ('MALE', 'FEMALE', 'OTHER')",
@@ -428,44 +434,200 @@ mod tests {
             config: cfg,
         });
 
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/users/{owner}"), stranger_token.clone(), json!({"roleId": admin_role})).await, StatusCode::FORBIDDEN);
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/users/{owner}"), owner_token.clone(), json!({"roleId": admin_role})).await, StatusCode::FORBIDDEN);
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/users/{owner}"), owner_token.clone(), json!({"password": "Password123!"})).await, StatusCode::BAD_REQUEST);
-        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/roles".into(), admin_token.clone(), json!({"name": "privileged"})).await, StatusCode::FORBIDDEN);
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/users/{owner}"),
+                stranger_token.clone(),
+                json!({"roleId": admin_role})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/users/{owner}"),
+                owner_token.clone(),
+                json!({"roleId": admin_role})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/users/{owner}"),
+                owner_token.clone(),
+                json!({"password": "Password123!"})
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::POST,
+                "/roles".into(),
+                admin_token.clone(),
+                json!({"name": "privileged"})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
 
-        let address_body = |recipient: &str, primary: bool| json!({
-            "userId": owner,
-            "recipientName": recipient,
-            "recipientPhoneNumber": "081234567890",
-            "province": "Banten",
-            "city": "Tangerang",
-            "subdistrict": "Serpong",
-            "village": "Lengkong",
-            "postalCode": "15310",
-            "address": "Street One",
-            "isPrimary": primary
-        });
-        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/addresses".into(), owner_token.clone(), address_body("First", false)).await, StatusCode::CREATED);
-        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/addresses".into(), owner_token.clone(), address_body("Second", true)).await, StatusCode::CREATED);
+        let address_body = |recipient: &str, primary: bool| {
+            json!({
+                "userId": owner,
+                "recipientName": recipient,
+                "recipientPhoneNumber": "081234567890",
+                "province": "Banten",
+                "city": "Tangerang",
+                "subdistrict": "Serpong",
+                "village": "Lengkong",
+                "postalCode": "15310",
+                "address": "Street One",
+                "isPrimary": primary
+            })
+        };
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::POST,
+                "/addresses".into(),
+                owner_token.clone(),
+                address_body("First", false)
+            )
+            .await,
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::POST,
+                "/addresses".into(),
+                owner_token.clone(),
+                address_body("Second", true)
+            )
+            .await,
+            StatusCode::CREATED
+        );
         let rows = address::Entity::find()
             .filter(address::Column::UserId.eq(owner))
             .all(&db)
             .await
             .unwrap();
         assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
-        let first = rows.iter().find(|address| address.recipient_name == "First").unwrap().id;
-        let second = rows.iter().find(|address| address.recipient_name == "Second").unwrap().id;
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), owner_token.clone(), json!({"isPrimary": true})).await, StatusCode::OK);
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), owner_token.clone(), json!({"isPrimary": false})).await, StatusCode::OK);
-        let second_row = address::Entity::find_by_id(second).one(&db).await.unwrap().unwrap();
+        let first = rows
+            .iter()
+            .find(|address| address.recipient_name == "First")
+            .unwrap()
+            .id;
+        let second = rows
+            .iter()
+            .find(|address| address.recipient_name == "Second")
+            .unwrap()
+            .id;
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/addresses/{first}"),
+                owner_token.clone(),
+                json!({"isPrimary": true})
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/addresses/{first}"),
+                owner_token.clone(),
+                json!({"isPrimary": false})
+            )
+            .await,
+            StatusCode::OK
+        );
+        let second_row = address::Entity::find_by_id(second)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(second_row.is_primary);
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), stranger_token.clone(), json!({"city": "Bandung"})).await, StatusCode::FORBIDDEN);
-        assert_eq!(send_json(app.clone(), axum::http::Method::POST, "/addresses".into(), stranger_token.clone(), address_body("Third", true)).await, StatusCode::FORBIDDEN);
-        assert_eq!(send_json(app.clone(), axum::http::Method::PATCH, format!("/addresses/{first}"), admin_token.clone(), json!({"userId": stranger})).await, StatusCode::OK);
-        assert_eq!(address::Entity::find_by_id(first).one(&db).await.unwrap().unwrap().user_id, stranger);
-        assert!(address::Entity::find_by_id(first).one(&db).await.unwrap().unwrap().is_primary);
-        assert!(address::Entity::find_by_id(second).one(&db).await.unwrap().unwrap().is_primary);
-        assert_eq!(send_json(app.clone(), axum::http::Method::DELETE, format!("/addresses/{first}"), stranger_token.clone(), json!({})).await, StatusCode::CONFLICT);
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/addresses/{first}"),
+                stranger_token.clone(),
+                json!({"city": "Bandung"})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::POST,
+                "/addresses".into(),
+                stranger_token.clone(),
+                address_body("Third", true)
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/addresses/{first}"),
+                admin_token.clone(),
+                json!({"userId": stranger})
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            address::Entity::find_by_id(first)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .user_id,
+            stranger
+        );
+        assert!(
+            address::Entity::find_by_id(first)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_primary
+        );
+        assert!(
+            address::Entity::find_by_id(second)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_primary
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::DELETE,
+                format!("/addresses/{first}"),
+                stranger_token.clone(),
+                json!({})
+            )
+            .await,
+            StatusCode::CONFLICT
+        );
 
         let mut simultaneous = Vec::new();
         for _ in 0..6 {
@@ -480,7 +642,11 @@ mod tests {
         for request in simultaneous {
             assert_eq!(request.await.unwrap(), StatusCode::CREATED);
         }
-        let rows = address::Entity::find().filter(address::Column::UserId.eq(owner)).all(&db).await.unwrap();
+        let rows = address::Entity::find()
+            .filter(address::Column::UserId.eq(owner))
+            .all(&db)
+            .await
+            .unwrap();
         assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
     }
 }

@@ -276,29 +276,64 @@ mod tests {
         let pending = format!("pending/users/{user}/{asset}");
         let permanent = format!("users/{user}/{asset}");
         let sample = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01";
-        storage.client.put_object()
+        storage
+            .client
+            .put_object()
             .bucket(&storage.bucket)
             .key(&pending)
             .content_type("image/png")
             .body(aws_sdk_s3::primitives::ByteStream::from(sample.to_vec()))
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         let etag = storage.verify_image(&pending).await.unwrap();
-        storage.copy_verified_image(&pending, &permanent, &etag).await.unwrap();
+        storage
+            .copy_verified_image(&pending, &permanent, &etag)
+            .await
+            .unwrap();
         storage.delete_image(&pending).await.unwrap();
-        assert!(storage.client.head_object().bucket(&storage.bucket).key(&pending).send().await.is_err());
-        let actual = storage.client.get_object()
-            .bucket(&storage.bucket).key(&permanent)
-            .send().await.unwrap().body.collect().await.unwrap().into_bytes();
+        assert!(
+            storage
+                .client
+                .head_object()
+                .bucket(&storage.bucket)
+                .key(&pending)
+                .send()
+                .await
+                .is_err()
+        );
+        let actual = storage
+            .client
+            .get_object()
+            .bucket(&storage.bucket)
+            .key(&permanent)
+            .send()
+            .await
+            .unwrap()
+            .body
+            .collect()
+            .await
+            .unwrap()
+            .into_bytes();
         assert_eq!(actual.as_ref(), sample);
 
         let invalid = format!("pending/users/{user}/{}", uuid::Uuid::new_v4());
-        storage.client.put_object()
+        storage
+            .client
+            .put_object()
             .bucket(&storage.bucket)
             .key(&invalid)
             .content_type("image/png")
-            .body(aws_sdk_s3::primitives::ByteStream::from(b"not-an-image".to_vec()))
-            .send().await.unwrap();
-        assert!(matches!(storage.verify_image(&invalid).await, Err(AppError::BadRequest(_))));
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                b"not-an-image".to_vec(),
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(matches!(
+            storage.verify_image(&invalid).await,
+            Err(AppError::BadRequest(_))
+        ));
         storage.delete_image(&invalid).await.unwrap();
         storage.delete_image(&permanent).await.unwrap();
     }
