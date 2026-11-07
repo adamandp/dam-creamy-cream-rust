@@ -31,12 +31,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Start isolated test MinIO
         run: |
           docker run -d --name creamy-minio-ci -p 9000:9000 \
             -e MINIO_ROOT_USER=test-access-key \
             -e MINIO_ROOT_PASSWORD=test-secret-key \
-            minio/minio server /data
+            quay.io/minio/minio server /data
           for attempt in {1..30}; do
             if curl --silent --fail http://127.0.0.1:9000/minio/health/live; then
               exit 0
@@ -45,9 +49,5 @@ jobs:
           done
           docker logs creamy-minio-ci
           exit 1
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --all-targets --locked
