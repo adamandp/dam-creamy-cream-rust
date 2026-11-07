@@ -19,7 +19,10 @@ use validator::Validate;
 
 use super::{auth, authorization};
 use crate::{
-    common::{Pagination, date, date_time, not_found, paging, parse_uuid, success, success_verb},
+    common::{
+        Pagination, date, date_time, not_found, paging, parse_uuid, require_changed_update,
+        success, success_verb,
+    },
     entity::{cart, role, user, user_token},
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
@@ -198,7 +201,10 @@ fn validate_email(value: &str) -> AppResult<()> {
 
 fn parse_birth_date(value: &str) -> AppResult<NaiveDate> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
-        .or_else(|_| chrono::DateTime::parse_from_rfc3339(value).map(|date| date.date_naive()))
+        .or_else(|_| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .map(|date| date.with_timezone(&Utc).date_naive())
+        })
         .map_err(|_| AppError::BadRequest("Invalid birthDate".into()))
 }
 
@@ -449,6 +455,27 @@ async fn update(
     if let Some(Some(ref phone)) = input.phone_number {
         validate_phone(phone)?;
     }
+    let requested_birth_date = input
+        .birth_date
+        .as_ref()
+        .map(|value| value.as_deref().map(parse_birth_date).transpose())
+        .transpose()?;
+    require_changed_update(&[
+        ("roleId", input.role_id.as_ref().map(|v| v == &row.role_id)),
+        ("username", input.username.as_ref().map(|v| v == &row.username)),
+        ("email", input.email.as_ref().map(|v| v == &row.email)),
+        (
+            "phoneNumber",
+            input.phone_number.as_ref().map(|v| v == &row.phone_number),
+        ),
+        ("fullName", input.full_name.as_ref().map(|v| v == &row.full_name)),
+        (
+            "birthDate",
+            requested_birth_date.as_ref().map(|v| v == &row.birth_date),
+        ),
+        ("gender", input.gender.as_ref().map(|v| v == &row.gender)),
+        ("isActive", input.is_active.as_ref().map(|v| v == &row.is_active)),
+    ])?;
     unique_fields(
         &state,
         input.username.as_deref(),
@@ -479,8 +506,8 @@ async fn update(
     if let Some(v) = input.gender {
         active.gender = Set(v);
     }
-    if let Some(v) = input.birth_date {
-        active.birth_date = Set(v.map(|v| parse_birth_date(&v)).transpose()?);
+    if let Some(v) = requested_birth_date {
+        active.birth_date = Set(v);
     }
     active.updated_at = Set(Utc::now().naive_utc());
     active.update(&tx).await.map_err(AppError::db)?;
@@ -764,7 +791,7 @@ async fn confirm_image(
     let previous_key = match write_result {
         Ok(key) => key,
         Err(err) => {
-            if let Err(cleanup_err) = cleanup_failed_final_image(&state, id, &final_key).await {
+            if let Err(cleanup_err) = delete_image_if_unreferenced(&state, id, &final_key).await {
                 tracing::warn!(
                     error = %cleanup_err,
                     object_key = final_key,
@@ -775,7 +802,7 @@ async fn confirm_image(
         }
     };
     for obsolete in obsolete_image_keys(input.key, previous_key, &final_key) {
-        if let Err(err) = state.storage.delete_image(&obsolete).await {
+        if let Err(err) = delete_image_if_unreferenced(&state, id, &obsolete).await {
             // The new image is committed, so failing the request would mislead the UI.
             tracing::warn!(error = %err, object_key = obsolete, "MinIO image cleanup failed");
         }
@@ -783,12 +810,12 @@ async fn confirm_image(
     Ok((StatusCode::CREATED, Json(success("updated", "User Image"))))
 }
 
-// Never check the image pointer and delete its MinIO object without holding
-// the same user-row lock as confirm_image. A competing confirmation might
-// otherwise commit between the check and deletion and lose its live image.
+// Both success and failure cleanup must take the same user-row lock as
+// confirm_image. Otherwise a later confirmation can reactivate an older
+// permanent key between a pointer check and an obsolete-object deletion.
 // If the database is unavailable, leave an orphan for later reconciliation
 // rather than risk removing a currently referenced object.
-pub(crate) async fn cleanup_failed_final_image(
+pub(crate) async fn delete_image_if_unreferenced(
     state: &AppState,
     user_id: Uuid,
     final_key: &str,
@@ -942,6 +969,11 @@ mod tests {
         assert_eq!(
             parse_birth_date("2004-09-26").unwrap(),
             parse_birth_date("2004-09-26T00:00:00.000Z").unwrap()
+        );
+        assert_eq!(
+            parse_birth_date("2026-11-07T00:30:00+14:00").unwrap(),
+            NaiveDate::from_ymd_opt(2026, 11, 6).unwrap(),
+            "RFC3339 offsets must be normalized to UTC before writing a DATE column"
         );
     }
 }

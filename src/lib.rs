@@ -68,7 +68,7 @@ mod tests {
     use chrono::Utc;
     use sea_orm::{
         ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, Database, DbBackend,
-        EntityTrait, MockDatabase, QueryFilter, Statement,
+        EntityTrait, MockDatabase, QueryFilter, QuerySelect, Statement, TransactionTrait,
     };
     use serde_json::{Value, json};
     use tower::ServiceExt;
@@ -503,6 +503,22 @@ mod tests {
             assert_eq!(result["data"][0]["id"], expected_id.to_string());
         }
 
+        // Legacy validateUpdate rejects an empty patch as well as fields
+        // explicitly submitted with unchanged values.
+        for patch in [json!({}), json!({"fullName": "Test User"})] {
+            assert_eq!(
+                send_json(
+                    app.clone(),
+                    axum::http::Method::PATCH,
+                    format!("/users/{owner}"),
+                    owner_token.clone(),
+                    patch,
+                )
+                .await,
+                StatusCode::BAD_REQUEST,
+            );
+        }
+
         assert_eq!(
             send_json(
                 app.clone(),
@@ -698,6 +714,19 @@ mod tests {
             .find(|address| address.recipient_name == "Second")
             .unwrap()
             .id;
+        for patch in [json!({}), json!({"city": "Tangerang"})] {
+            assert_eq!(
+                send_json(
+                    app.clone(),
+                    axum::http::Method::PATCH,
+                    format!("/addresses/{first}"),
+                    owner_token.clone(),
+                    patch,
+                )
+                .await,
+                StatusCode::BAD_REQUEST,
+            );
+        }
         assert_eq!(
             send_json(
                 app.clone(),
@@ -1082,5 +1111,42 @@ mod tests {
             session::valid_stored_refresh(&runtime, &old_refresh).await,
             Err(crate::error::AppError::Unauthorized(_))
         ));
+
+        // An obsolete-image cleanup must never remove a key that became the
+        // currently referenced image. Offline storage deliberately fails on
+        // deletion, so Ok(()) proves that the key was protected by the row
+        // lock and active-reference check, without requiring live MinIO.
+        let asset = uuid::Uuid::new_v4();
+        let active_key = format!("users/{root}/{asset}");
+        let tx = db.begin().await.unwrap();
+        let current = user::Entity::find_by_id(root)
+            .lock_exclusive()
+            .one(&tx)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: user::ActiveModel = current.into();
+        active.image_url = Set(Some(format!(
+            "{}/media/users/{root}/{asset}",
+            runtime.config.public_base_url
+        )));
+        active.update(&tx).await.unwrap();
+        let pending_cleanup = tokio::spawn({
+            let state = runtime.clone();
+            let key = active_key.clone();
+            async move { crate::features::users::delete_image_if_unreferenced(&state, root, &key).await }
+        });
+        tokio::task::yield_now().await;
+        tx.commit().await.unwrap();
+        pending_cleanup.await.unwrap().unwrap();
+        assert_eq!(
+            user::Entity::find_by_id(root)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .image_url,
+            Some(format!("{}/media/users/{root}/{asset}", runtime.config.public_base_url))
+        );
     }
 }

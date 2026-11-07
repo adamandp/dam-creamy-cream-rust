@@ -7,8 +7,10 @@ use sea_orm::entity::prelude::*;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GenderType {
     #[sea_orm(string_value = "MALE")]
+    #[serde(alias = "MAN")]
     Male,
     #[sea_orm(string_value = "FEMALE")]
+    #[serde(alias = "WOMAN")]
     Female,
     #[sea_orm(string_value = "OTHER")]
     Other,
@@ -44,3 +46,25 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::GenderType;
+
+    #[test]
+    fn accepts_legacy_gender_input_and_preserves_database_wire_value() {
+        assert_eq!(
+            serde_json::from_str::<GenderType>("\"MAN\"").unwrap(),
+            GenderType::Male
+        );
+        assert_eq!(
+            serde_json::from_str::<GenderType>("\"WOMAN\"").unwrap(),
+            GenderType::Female
+        );
+        assert_eq!(serde_json::to_string(&GenderType::Male).unwrap(), "\"MALE\"");
+        assert_eq!(
+            serde_json::to_string(&GenderType::Female).unwrap(),
+            "\"FEMALE\""
+        );
+    }
+}

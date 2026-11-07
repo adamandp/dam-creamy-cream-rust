@@ -18,7 +18,10 @@ use validator::Validate;
 
 use super::{authorization, session};
 use crate::{
-    common::{Pagination, date_time, not_found, paging, parse_uuid, success, success_verb},
+    common::{
+        Pagination, date_time, not_found, paging, parse_uuid, require_changed_update, success,
+        success_verb,
+    },
     entity::{address, user},
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
@@ -339,6 +342,37 @@ async fn update(
             "Address changed concurrently; retry".into(),
         ));
     }
+    require_changed_update(&[
+        ("userId", body.user_id.as_ref().map(|v| v == &model.user_id)),
+        (
+            "recipientName",
+            body.recipient_name
+                .as_ref()
+                .map(|v| v == &model.recipient_name),
+        ),
+        (
+            "recipientPhoneNumber",
+            body.recipient_phone_number
+                .as_ref()
+                .map(|v| v == &model.recipient_phone_number),
+        ),
+        ("province", body.province.as_ref().map(|v| v == &model.province)),
+        ("city", body.city.as_ref().map(|v| v == &model.city)),
+        (
+            "subdistrict",
+            body.subdistrict.as_ref().map(|v| v == &model.subdistrict),
+        ),
+        ("village", body.village.as_ref().map(|v| v == &model.village)),
+        (
+            "postalCode",
+            body.postal_code.as_ref().map(|v| v == &model.postal_code),
+        ),
+        ("address", body.address.as_ref().map(|v| v == &model.address)),
+        (
+            "isPrimary",
+            body.is_primary.as_ref().map(|v| v == &model.is_primary),
+        ),
+    ])?;
     let moving = target_user_id != initial.user_id;
     if moving {
         // Orders retain their shipping address, so ownership transfers may

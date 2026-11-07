@@ -60,8 +60,46 @@ pub fn parse_uuid(value: &str) -> AppResult<uuid::Uuid> {
         .map_err(|_| AppError::BadRequest("Validation failed (uuid is expected)".into()))
 }
 
+// Preserve the legacy NestJS validateUpdate contract. A PATCH with no fields
+// or with even one supplied field identical to its persisted value is a 400.
+// An entry of None means the field was omitted; Some(true) means unchanged.
+pub fn require_changed_update(fields: &[(&str, Option<bool>)]) -> AppResult<()> {
+    if fields.iter().all(|(_, same)| same.is_none()) {
+        return Err(AppError::BadRequest(
+            "📭 No changes detected. Everything is already up to date! 👍".into(),
+        ));
+    }
+    let unchanged = fields
+        .iter()
+        .filter_map(|(name, same)| (*same == Some(true)).then_some(*name))
+        .collect::<Vec<_>>();
+    if !unchanged.is_empty() {
+        return Err(AppError::BadRequest(format!(
+            "📭 No changes detected in {} fields. Everything’s already up to date!",
+            unchanged.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 pub fn not_found(resource: &str) -> AppError {
     AppError::NotFound(format!(
         "🔍 {resource} not found. Maybe it teleported to another dimension? 🛸"
     ))
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn patch_requires_a_changed_field_and_rejects_mixed_unchanged_values() {
+        assert!(require_changed_update(&[]).is_err());
+        assert!(require_changed_update(&[("city", Some(true))]).is_err());
+        assert!(require_changed_update(&[("city", None)]).is_err());
+        assert!(require_changed_update(&[("city", Some(false))]).is_ok());
+        assert!(
+            require_changed_update(&[("city", Some(false)), ("province", Some(true))]).is_err()
+        );
+    }
 }
