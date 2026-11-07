@@ -7,8 +7,9 @@ use axum::{
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseTransaction,
+    DbBackend, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
+    TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -266,8 +267,15 @@ async fn find_by_user(State(state): State<AppState>, jar: CookieJar) -> AppResul
         .map(|v| v.value())
         .ok_or_else(|| AppError::Unauthorized("Missing refreshToken cookie".into()))?;
     let claims = session::valid_stored_refresh(&state, token).await?;
+    let user_id = parse_uuid(&claims.sub)?;
+    let account = user::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| AppError::Unauthorized("Account no longer exists".into()))?;
+    authorization::ensure_active(&state.config, &account)?;
     let items = address::Entity::find()
-        .filter(address::Column::UserId.eq(parse_uuid(&claims.sub)?))
+        .filter(address::Column::UserId.eq(user_id))
         .all(&state.db)
         .await
         .map_err(AppError::db)?;
@@ -319,6 +327,7 @@ async fn update(
         return Err(not_found("User"));
     }
     let model = address::Entity::find_by_id(id)
+        .lock_exclusive()
         .one(&tx)
         .await
         .map_err(AppError::db)?
@@ -329,6 +338,24 @@ async fn update(
         ));
     }
     let moving = target_user_id != initial.user_id;
+    if moving {
+        // Orders retain their shipping address, so ownership transfers may
+        // never change an address already used by historical orders. The
+        // exclusive address lock also blocks concurrent FK references.
+        let referenced = tx
+            .query_one_raw(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 FROM orders WHERE address_id = $1 LIMIT 1",
+                [id.into()],
+            ))
+            .await
+            .map_err(AppError::db)?;
+        if referenced.is_some() {
+            return Err(AppError::Conflict(
+                "Cannot transfer an address referenced by an order".into(),
+            ));
+        }
+    }
     let destination_count = if moving {
         let count = address::Entity::find()
             .filter(address::Column::UserId.eq(target_user_id))

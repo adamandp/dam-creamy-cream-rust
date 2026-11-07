@@ -523,6 +523,28 @@ mod tests {
             .await,
             StatusCode::FORBIDDEN
         );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/roles/{root_role}"),
+                root_token.clone(),
+                json!({"name": "owner"})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::DELETE,
+                format!("/roles/{root_role}"),
+                root_token.clone(),
+                json!({})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
 
         let address_body = |recipient: &str, primary: bool| {
             json!({
@@ -694,6 +716,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
+        // An order address must never be assigned to a different user.
+        db.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO orders (id, user_id, address_id) VALUES ($1, $2, $3)",
+            [uuid::Uuid::new_v4().into(), owner.into(), second.into()],
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PATCH,
+                format!("/addresses/{second}"),
+                admin_token.clone(),
+                json!({"userId": stranger})
+            )
+            .await,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            address::Entity::find_by_id(second)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .user_id,
+            owner
+        );
         // The actual schema prevents deleting accounts that have any FK
         // dependencies. Deletion must clean an empty cart and stale sessions.
         let empty_cart = uuid::Uuid::new_v4();
@@ -733,13 +783,6 @@ mod tests {
         );
 
         // A user with an order must remain intact, including address history.
-        db.execute_raw(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "INSERT INTO orders (id, user_id, address_id) VALUES ($1, $2, $3)",
-            [uuid::Uuid::new_v4().into(), owner.into(), second.into()],
-        ))
-        .await
-        .unwrap();
         assert_eq!(
             send_json(
                 app.clone(),
@@ -795,6 +838,36 @@ mod tests {
         )
         .await
         .unwrap();
+        // Simulate an external/legacy service deactivating a user without
+        // revoking refresh tokens. /addresses/user must independently block it.
+        let mut externally_disabled: user::ActiveModel = user::Entity::find_by_id(inactive)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        externally_disabled.is_active = Set(false);
+        externally_disabled.update(&db).await.unwrap();
+        let address_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/addresses/user")
+                    .header(axum::http::header::COOKIE, format!("refreshToken={refresh_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(address_response.status(), StatusCode::UNAUTHORIZED);
+        let mut enabled_again: user::ActiveModel = user::Entity::find_by_id(inactive)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        enabled_again.is_active = Set(true);
+        enabled_again.update(&db).await.unwrap();
         assert_eq!(
             send_json(
                 app.clone(),

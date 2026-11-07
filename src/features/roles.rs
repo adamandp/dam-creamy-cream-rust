@@ -37,6 +37,10 @@ fn response(model: role::Model) -> Value {
     json!({"id": model.id, "name": model.name})
 }
 
+fn is_builtin_role(name: &str) -> bool {
+    matches!(name, "customer" | "admin" | "super-admin")
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/", get(find_all).post(create))
@@ -133,6 +137,13 @@ async fn update(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Role"))?;
+    if body.name != model.name
+        && (is_builtin_role(&body.name) || is_builtin_role(&model.name))
+    {
+        return Err(AppError::Forbidden(
+            "Built-in role names cannot be changed".into(),
+        ));
+    }
     let mut active: role::ActiveModel = model.into();
     active.name = Set(body.name);
     active.updated_at = Set(Utc::now().naive_utc());
@@ -148,7 +159,18 @@ async fn remove(
     authorization::authenticate(&state, &headers)
         .await?
         .require_super_admin()?;
-    let result = role::Entity::delete_by_id(parse_uuid(&id)?)
+    let id = parse_uuid(&id)?;
+    let role = role::Entity::find_by_id(id)
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Role"))?;
+    if is_builtin_role(&role.name) {
+        return Err(AppError::Forbidden(
+            "Built-in roles cannot be deleted".into(),
+        ));
+    }
+    let result = role::Entity::delete_by_id(id)
         .exec(&state.db)
         .await
         .map_err(AppError::db)?;

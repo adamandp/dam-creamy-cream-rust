@@ -659,13 +659,13 @@ async fn presign_image(
     let key = format!("pending/users/{id}/{}", Uuid::new_v4());
     let url = state
         .storage
-        .presign_put(&key, &input.mime_type, input.file_size)
+        .presign_put(&key, &input.mime_type)
         .await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({
             "data": {"uploadUrl": url, "key": key, "expiresIn": 600,
-            "headers": {"Content-Type": input.mime_type, "Content-Length": input.file_size}},
+            "headers": {"Content-Type": input.mime_type}},
         })),
     ))
 }
@@ -684,7 +684,6 @@ async fn confirm_image(
         .strip_prefix(&prefix)
         .ok_or_else(|| AppError::BadRequest("Invalid image object key".into()))?;
     parse_uuid(asset_id)?;
-    let etag = state.storage.verify_image(&input.key).await?;
     let image_url = format!(
         "{}/media/users/{id}/{asset_id}",
         state.config.public_base_url
@@ -695,24 +694,39 @@ async fn confirm_image(
         ));
     }
     let final_key = format!("users/{id}/{asset_id}");
-    state
-        .storage
-        .copy_verified_image(&input.key, &final_key, &etag)
-        .await?;
+    // Idempotent retry: the staging object may already have been removed by
+    // the first successful confirm. The persisted image URL is authoritative.
+    let existing_user = user::Entity::find_by_id(id)
+        .one(&state.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("User"))?;
+    if existing_user.image_url.as_deref() == Some(image_url.as_str()) {
+        return Ok((StatusCode::CREATED, Json(success("updated", "User Image"))));
+    }
+    let etag = state.storage.verify_image(&input.key).await?;
     let write_result: AppResult<Option<String>> = async {
         let tx = state.db.begin().await.map_err(AppError::db)?;
-        // Re-read under a row lock so simultaneous confirmations cannot orphan
-        // each other's previous images.
+        // Serialize both the immutable copy and the metadata update on the
+        // user row. This prevents double-confirm from deleting a live object.
         let row = user::Entity::find_by_id(id)
             .lock_exclusive()
             .one(&tx)
             .await
             .map_err(AppError::db)?
             .ok_or_else(|| not_found("User"))?;
+        if row.image_url.as_deref() == Some(image_url.as_str()) {
+            tx.commit().await.map_err(AppError::db)?;
+            return Ok(None);
+        }
         let previous_key = row
             .image_url
             .as_deref()
             .and_then(|value| persisted_image_key(value, id));
+        state
+            .storage
+            .copy_verified_image(&input.key, &final_key, &etag)
+            .await?;
         let mut active: user::ActiveModel = row.into();
         active.image_url = Set(Some(image_url));
         active.updated_at = Set(Utc::now().naive_utc());
@@ -724,19 +738,35 @@ async fn confirm_image(
     let previous_key = match write_result {
         Ok(key) => key,
         Err(err) => {
-            if let Err(cleanup_err) = state.storage.delete_image(&final_key).await {
+            let currently_referenced = user::Entity::find_by_id(id)
+                .one(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|user| user.image_url.as_deref() == Some(image_url.as_str()));
+            if !currently_referenced
+                && let Err(cleanup_err) = state.storage.delete_image(&final_key).await
+            {
                 tracing::warn!(error = %cleanup_err, "could not clean up failed image confirmation");
             }
             return Err(err);
         }
     };
-    for obsolete in [Some(input.key), previous_key].into_iter().flatten() {
+    for obsolete in obsolete_image_keys(input.key, previous_key, &final_key) {
         if let Err(err) = state.storage.delete_image(&obsolete).await {
             // The new image is committed, so failing the request would mislead the UI.
             tracing::warn!(error = %err, object_key = obsolete, "MinIO image cleanup failed");
         }
     }
     Ok((StatusCode::CREATED, Json(success("updated", "User Image"))))
+}
+
+fn obsolete_image_keys(pending: String, previous: Option<String>, current: &str) -> Vec<String> {
+    [Some(pending), previous]
+        .into_iter()
+        .flatten()
+        .filter(|key| key != current)
+        .collect()
 }
 
 fn persisted_image_key(url: &str, user_id: Uuid) -> Option<String> {
@@ -774,6 +804,18 @@ mod image_tests {
                 user
             ),
             None
+        );
+    }
+
+    #[test]
+    fn duplicate_image_confirmation_never_deletes_current_image() {
+        let pending = "pending/users/owner/asset".to_owned();
+        let current = "users/owner/asset".to_owned();
+        let previous = Some(current.clone());
+        assert_eq!(obsolete_image_keys(pending.clone(), previous, &current), vec![pending]);
+        assert_eq!(
+            obsolete_image_keys("pending/another".into(), Some("users/previous".into()), &current),
+            vec!["pending/another", "users/previous"]
         );
     }
 }
