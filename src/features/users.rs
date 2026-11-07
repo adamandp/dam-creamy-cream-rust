@@ -9,7 +9,7 @@ use chrono::{NaiveDate, Utc};
 use regex::Regex;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, PaginatorTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    ConnectionTrait, DbBackend, QueryFilter, QuerySelect, Statement, TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -20,7 +20,7 @@ use validator::Validate;
 use super::{auth, authorization};
 use crate::{
     common::{Pagination, date, date_time, not_found, paging, parse_uuid, success, success_verb},
-    entity::{cart, role, user},
+    entity::{cart, role, user, user_token},
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
     state::AppState,
@@ -381,6 +381,29 @@ async fn update(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
+    if input.role_id.is_some() && !actor.is_super_admin {
+        return Err(AppError::Forbidden(
+            "Only super administrators can assign roles".into(),
+        ));
+    }
+    if actor.id == id && (input.role_id.is_some() || input.is_active.is_some()) {
+        return Err(AppError::Forbidden(
+            "Cannot change your own role or activation status".into(),
+        ));
+    }
+    // An administrator must not be able to deactivate, edit or remove a
+    // super-administrator account, even through non-role fields.
+    if !actor.is_super_admin && actor.id != id {
+        let target_role = role::Entity::find_by_id(row.role_id)
+            .one(&state.db)
+            .await
+            .map_err(AppError::db)?;
+        if target_role.is_some_and(|role| role.name == "super-admin") {
+            return Err(AppError::Forbidden(
+                "Cannot modify a super administrator".into(),
+            ));
+        }
+    }
     if let Some(role_id) = input.role_id
         && role::Entity::find_by_id(role_id)
             .one(&state.db)
@@ -468,10 +491,30 @@ async fn update_password(
     if auth::verify_password(input.new_password.clone(), row.password.clone()).await? {
         return Err(AppError::BadRequest("🔁 New password can't be the same as your current password. Try something different! 😉".into()));
     }
-    let mut active: user::ActiveModel = row.into();
-    active.password = Set(auth::hash_password(input.new_password).await?);
+    let original_hash = row.password.clone();
+    let replacement_hash = auth::hash_password(input.new_password).await?;
+    let tx = state.db.begin().await.map_err(AppError::db)?;
+    let locked = user::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&tx)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("User"))?;
+    if locked.password != original_hash {
+        return Err(AppError::Conflict(
+            "Password changed during this request; please retry".into(),
+        ));
+    }
+    let mut active: user::ActiveModel = locked.into();
+    active.password = Set(replacement_hash);
     active.updated_at = Set(Utc::now().naive_utc());
-    active.update(&state.db).await.map_err(AppError::db)?;
+    active.update(&tx).await.map_err(AppError::db)?;
+    user_token::Entity::delete_many()
+        .filter(user_token::Column::UserId.eq(id))
+        .exec(&tx)
+        .await
+        .map_err(AppError::db)?;
+    tx.commit().await.map_err(AppError::db)?;
     Ok(Json(success("updated", "User Password")))
 }
 
@@ -481,9 +524,8 @@ async fn remove(
     headers: HeaderMap,
 ) -> AppResult<Json<Value>> {
     let id = parse_uuid(&id)?;
-    authorization::authenticate(&state, &headers)
-        .await?
-        .require_owner_or_admin(id)?;
+    let actor = authorization::authenticate(&state, &headers).await?;
+    actor.require_owner_or_admin(id)?;
     let tx = state.db.begin().await.map_err(AppError::db)?;
     let row = user::Entity::find_by_id(id)
         .lock_exclusive()
@@ -491,6 +533,52 @@ async fn remove(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("User"))?;
+    if !actor.is_super_admin {
+        let target_role = role::Entity::find_by_id(row.role_id)
+            .one(&tx)
+            .await
+            .map_err(AppError::db)?;
+        if target_role.is_some_and(|role| role.name == "super-admin") {
+            return Err(AppError::Forbidden(
+                "Cannot delete a super administrator".into(),
+            ));
+        }
+    }
+    // Orders and their addresses are financial history, so retaining them is
+    // more important than making a destructive deletion silently succeed.
+    let historical_orders = tx
+        .query_one_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 FROM orders WHERE user_id = $1 OR address_id IN (SELECT id FROM addresses WHERE user_id = $1) LIMIT 1",
+            [id.into()],
+        ))
+        .await
+        .map_err(AppError::db)?;
+    if historical_orders.is_some() {
+        return Err(AppError::Conflict(
+            "Account has order history and cannot be permanently deleted".into(),
+        ));
+    }
+    // The original Prisma schema uses RESTRICT for all user dependencies.
+    // Remove non-financial associations in child-first order, transactionally.
+    for statement in [
+        "DELETE FROM cart_items WHERE cart_id IN (SELECT id FROM carts WHERE user_id = $1)",
+        "DELETE FROM carts WHERE user_id = $1",
+        "DELETE FROM user_tokens WHERE user_id = $1",
+        "DELETE FROM addresses WHERE user_id = $1",
+        "DELETE FROM reviews WHERE user_id = $1",
+        "DELETE FROM user_vouchers WHERE user_id = $1",
+        "DELETE FROM product_analytics WHERE user_id = $1",
+        "DELETE FROM user_notifications WHERE user_id = $1",
+    ] {
+        tx.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            statement,
+            [id.into()],
+        ))
+        .await
+        .map_err(AppError::db)?;
+    }
     let previous_key = row
         .image_url
         .as_deref()

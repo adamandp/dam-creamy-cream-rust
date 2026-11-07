@@ -30,6 +30,15 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Temporary build step to capture the regenerated lockfile for the
+      # new image decoder dependency; removed in the next commit.
+      - name: Generate checked-in lockfile
+        run: |
+          cargo generate-lockfile
+          echo LOCKFILE_BEGIN
+          base64 -w0 Cargo.lock
+          echo
+          echo LOCKFILE_END
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy

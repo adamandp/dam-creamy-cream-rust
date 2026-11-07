@@ -59,6 +59,7 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Ac
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| AppError::Unauthorized("Account no longer exists".into()))?;
+    ensure_active(&state.config, &current_user)?;
     // Never authorize using a potentially stale role claim from a previously issued JWT.
     let current_role = role::Entity::find_by_id(current_user.role_id)
         .one(&state.db)
@@ -71,6 +72,16 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Ac
         is_admin: is_super_admin || current_role.name == "admin",
         is_super_admin,
     })
+}
+
+pub fn ensure_active(config: &crate::config::Config, account: &user::Model) -> AppResult<()> {
+    // The legacy dummy account intentionally starts inactive; this exception is
+    // restricted to the explicit development-only dummy login workflow.
+    if account.is_active || (!config.production && account.username == "DummyUser") {
+        Ok(())
+    } else {
+        Err(AppError::Unauthorized("Account is inactive".into()))
+    }
 }
 
 #[cfg(test)]

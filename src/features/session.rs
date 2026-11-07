@@ -9,6 +9,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::authorization;
 use crate::{
     config::Config,
     entity::{user, user_token},
@@ -94,12 +95,13 @@ pub async fn create_tokens(
     let refresh = sign(&state.config, sub, role, true)?;
     let now = Utc::now().naive_utc();
     let tx = state.db.begin().await.map_err(AppError::db)?;
-    user::Entity::find_by_id(user_id)
+    let account = user::Entity::find_by_id(user_id)
         .lock_exclusive()
         .one(&tx)
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    authorization::ensure_active(&state.config, &account)?;
     if let Some(previous) = previous.filter(|token| !token.is_empty()) {
         let row = user_token::Entity::find()
             .filter(user_token::Column::Token.eq(previous))
@@ -237,6 +239,7 @@ pub async fn refresh(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| AppError::Unauthorized("Account no longer exists".into()))?;
+    authorization::ensure_active(&state.config, &current_user)?;
     let access = create_access(
         &state.config,
         &claims.sub,

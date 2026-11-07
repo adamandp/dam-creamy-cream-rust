@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{io::Cursor, time::Duration};
 
 use aws_credential_types::Credentials;
 use aws_sdk_s3::{
@@ -106,25 +106,27 @@ impl Storage {
             .e_tag()
             .ok_or_else(|| AppError::BadRequest("Image has no object ETag".into()))?
             .to_owned();
-        let sample = self
+        // Fully download and decode the verified object. Its HEAD size is
+        // capped at 2 MiB, and image decoding has an independent pixel/memory
+        // budget to reject decompression bombs and truncated file signatures.
+        let uploaded = self
             .client
             .get_object()
             .bucket(&self.bucket)
             .key(key)
-            .range("bytes=0-63")
             .if_match(etag.as_str())
             .send()
             .await
             .map_err(|_| AppError::BadRequest("Image changed during verification".into()))?;
-        let data = sample
+        let data = uploaded
             .body
             .collect()
             .await
-            .map_err(|_| AppError::BadRequest("Could not read image signature".into()))?
+            .map_err(|_| AppError::BadRequest("Could not read image content".into()))?
             .into_bytes();
-        if !valid_image_signature(mime, data.as_ref()) {
+        if data.len() as i64 != size || !valid_image(mime, data.as_ref()) {
             return Err(AppError::BadRequest(
-                "Uploaded content does not match the declared image type".into(),
+                "Uploaded image is corrupt, oversized, or does not match its image type".into(),
             ));
         }
         Ok(etag)
@@ -195,9 +197,46 @@ fn valid_image_signature(mime: &str, data: &[u8]) -> bool {
     }
 }
 
+fn valid_image(mime: &str, data: &[u8]) -> bool {
+    if !valid_image_signature(mime, data) || data.len() > 2_097_152 {
+        return false;
+    }
+    let format = match mime {
+        "image/jpeg" => image::ImageFormat::Jpeg,
+        "image/png" => image::ImageFormat::Png,
+        "image/webp" => image::ImageFormat::WebP,
+        _ => return false,
+    };
+    let mut reader = image::ImageReader::with_format(Cursor::new(data), format);
+    reader.limits(image::Limits {
+        max_image_width: Some(4096),
+        max_image_height: Some(4096),
+        max_alloc: Some(32 * 1024 * 1024),
+        ..image::Limits::default()
+    });
+    reader.decode().is_ok()
+}
+
 #[cfg(test)]
 mod signature_tests {
-    use super::valid_image_signature;
+    use super::{valid_image, valid_image_signature};
+
+    #[test]
+    fn truncated_magic_bytes_are_not_valid_decodable_images() {
+        assert!(!valid_image("image/png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"));
+        assert!(!valid_image("image/jpeg", &[0xff, 0xd8, 0xff, 1]));
+        assert!(!valid_image("image/webp", b"RIFF\x00\x00\x00\x00WEBPVP8 "));
+    }
+
+    #[test]
+    fn real_png_round_trip_is_accepted() {
+        let mut result = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut result, image::ImageFormat::Png)
+            .unwrap();
+        assert!(valid_image("image/png", result.get_ref()));
+        assert!(!valid_image("image/jpeg", result.get_ref()));
+    }
 
     #[test]
     fn image_magic_bytes_must_match_declared_mime() {
@@ -275,14 +314,18 @@ mod tests {
         let asset = uuid::Uuid::new_v4();
         let pending = format!("pending/users/{user}/{asset}");
         let permanent = format!("users/{user}/{asset}");
-        let sample = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01";
+        let mut sample = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut sample, image::ImageFormat::Png)
+            .unwrap();
+        let sample = sample.into_inner();
         storage
             .client
             .put_object()
             .bucket(&storage.bucket)
             .key(&pending)
             .content_type("image/png")
-            .body(aws_sdk_s3::primitives::ByteStream::from(sample.to_vec()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(sample.clone()))
             .send()
             .await
             .unwrap();
@@ -315,7 +358,7 @@ mod tests {
             .await
             .unwrap()
             .into_bytes();
-        assert_eq!(actual.as_ref(), sample);
+        assert_eq!(actual.as_ref(), sample.as_slice());
 
         let invalid = format!("pending/users/{user}/{}", uuid::Uuid::new_v4());
         storage

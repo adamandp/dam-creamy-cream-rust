@@ -75,7 +75,7 @@ mod tests {
 
     use crate::{
         config::Config,
-        entity::{address, role, user},
+        entity::{address, cart, role, user, user_token},
         features::session,
         infrastructure::storage::Storage,
     };
@@ -374,6 +374,14 @@ mod tests {
             "CREATE TABLE roles (id UUID PRIMARY KEY, name VARCHAR(50) UNIQUE NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
             "CREATE TABLE users (id UUID PRIMARY KEY, role_id UUID NOT NULL REFERENCES roles(id), username VARCHAR(50) UNIQUE NOT NULL, email VARCHAR(255), phone_number VARCHAR(100), password VARCHAR(255) NOT NULL, full_name VARCHAR(100) NOT NULL, birth_date DATE, image_url VARCHAR(255), gender \"GENDER_TYPE\", is_active BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
             "CREATE TABLE addresses (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), recipient_name VARCHAR(100) NOT NULL, recipient_phone_number VARCHAR(100) NOT NULL, province VARCHAR(100) NOT NULL, city VARCHAR(100) NOT NULL, subdistrict VARCHAR(100) NOT NULL, village VARCHAR(100) NOT NULL, postal_code VARCHAR(100) NOT NULL, address VARCHAR(100) NOT NULL, is_primary BOOLEAN NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+            "CREATE TABLE carts (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+            "CREATE TABLE cart_items (id UUID PRIMARY KEY, cart_id UUID NOT NULL REFERENCES carts(id))",
+            "CREATE TABLE user_tokens (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), token VARCHAR(255) UNIQUE NOT NULL, \"browserInfo\" TEXT NOT NULL, \"expiredAt\" TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)",
+            "CREATE TABLE orders (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), address_id UUID NOT NULL REFERENCES addresses(id))",
+            "CREATE TABLE reviews (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id))",
+            "CREATE TABLE user_vouchers (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id))",
+            "CREATE TABLE product_analytics (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id))",
+            "CREATE TABLE user_notifications (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id))",
         ] {
             db.execute_raw(Statement::from_string(DbBackend::Postgres, ddl.to_owned()))
                 .await
@@ -382,7 +390,12 @@ mod tests {
         let now = Utc::now().naive_utc();
         let customer_role = uuid::Uuid::new_v4();
         let admin_role = uuid::Uuid::new_v4();
-        for (id, name) in [(customer_role, "customer"), (admin_role, "admin")] {
+        let root_role = uuid::Uuid::new_v4();
+        for (id, name) in [
+            (customer_role, "customer"),
+            (admin_role, "admin"),
+            (root_role, "super-admin"),
+        ] {
             role::ActiveModel {
                 id: Set(id),
                 name: Set(name.to_owned()),
@@ -396,10 +409,12 @@ mod tests {
         let owner = uuid::Uuid::new_v4();
         let stranger = uuid::Uuid::new_v4();
         let administrator = uuid::Uuid::new_v4();
+        let root = uuid::Uuid::new_v4();
         for (id, role_id, username) in [
             (owner, customer_role, "integrationowner"),
             (stranger, customer_role, "integrationstranger"),
             (administrator, admin_role, "integrationadmin"),
+            (root, root_role, "integrationroot"),
         ] {
             user::ActiveModel {
                 id: Set(id),
@@ -427,6 +442,7 @@ mod tests {
         let owner_token = token_for(owner, customer_role);
         let stranger_token = token_for(stranger, customer_role);
         let admin_token = token_for(administrator, admin_role);
+        let root_token = token_for(root, root_role);
         let app = router(AppState {
             db: db.clone(),
             redis: redis::Client::open(cfg.redis_url.clone()).unwrap(),
@@ -452,6 +468,35 @@ mod tests {
                 format!("/users/{owner}"),
                 owner_token.clone(),
                 json!({"roleId": admin_role})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        for (target, body) in [
+            (administrator, json!({"roleId": root_role})),
+            (root, json!({"isActive": false})),
+            (root, json!({"fullName": "Compromised"})),
+            (owner, json!({"roleId": root_role})),
+        ] {
+            assert_eq!(
+                send_json(
+                    app.clone(),
+                    axum::http::Method::PATCH,
+                    format!("/users/{target}"),
+                    admin_token.clone(),
+                    body,
+                )
+                .await,
+                StatusCode::FORBIDDEN,
+            );
+        }
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::DELETE,
+                format!("/users/{root}"),
+                admin_token.clone(),
+                json!({}),
             )
             .await,
             StatusCode::FORBIDDEN
@@ -521,6 +566,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
+
         let first = rows
             .iter()
             .find(|address| address.recipient_name == "First")
@@ -648,5 +694,164 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.iter().filter(|address| address.is_primary).count(), 1);
+        // The actual schema prevents deleting accounts that have any FK
+        // dependencies. Deletion must clean an empty cart and stale sessions.
+        let empty_cart = uuid::Uuid::new_v4();
+        cart::ActiveModel {
+            id: Set(empty_cart),
+            user_id: Set(stranger),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        db.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO cart_items (id, cart_id) VALUES ($1, $2)",
+            [uuid::Uuid::new_v4().into(), empty_cart.into()],
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::DELETE,
+                format!("/users/{stranger}"),
+                stranger_token,
+                json!({}),
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert!(user::Entity::find_by_id(stranger).one(&db).await.unwrap().is_none());
+
+        // A user with an order must remain intact, including address history.
+        db.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO orders (id, user_id, address_id) VALUES ($1, $2, $3)",
+            [uuid::Uuid::new_v4().into(), owner.into(), second.into()],
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::DELETE,
+                format!("/users/{owner}"),
+                owner_token.clone(),
+                json!({}),
+            )
+            .await,
+            StatusCode::CONFLICT
+        );
+        assert!(user::Entity::find_by_id(owner).one(&db).await.unwrap().is_some());
+
+        // Deactivated accounts cannot use either still-valid access or
+        // stored refresh tokens; dummy behavior remains development-only.
+        let inactive = uuid::Uuid::new_v4();
+        user::ActiveModel {
+            id: Set(inactive),
+            role_id: Set(customer_role),
+            username: Set("integrationinactive".into()),
+            email: Set(None),
+            phone_number: Set(None),
+            password: Set("unused-hash".into()),
+            full_name: Set("Inactive User".into()),
+            birth_date: Set(None),
+            image_url: Set(None),
+            gender: Set(None),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let runtime = AppState {
+            db: db.clone(),
+            redis: redis::Client::open(config().redis_url.clone()).unwrap(),
+            storage: Storage::offline(&config()),
+            config: config(),
+        };
+        let (_, refresh_token) = session::create_tokens(
+            &runtime,
+            &inactive.to_string(),
+            &customer_role.to_string(),
+            None,
+            "test-device".into(),
+        )
+        .await
+        .unwrap();
+        let mut inactive_row: user::ActiveModel = user::Entity::find_by_id(inactive)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        inactive_row.is_active = Set(false);
+        inactive_row.update(&db).await.unwrap();
+        assert_eq!(
+            authorized_request(app.clone(), "/users/profile", inactive, customer_role)
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri("/sessions/refresh")
+                    .header(axum::http::header::COOKIE, format!("refreshToken={refresh_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // A password update atomically revokes every existing refresh session.
+        let mut password_user: user::ActiveModel = user::Entity::find_by_id(root)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        password_user.password = Set(crate::features::auth::hash_password("OldPassword1!".into()).await.unwrap());
+        password_user.update(&db).await.unwrap();
+        let (_, old_refresh) = session::create_tokens(
+            &runtime,
+            &root.to_string(),
+            &root_role.to_string(),
+            None,
+            "test-device".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            send_json(
+                app.clone(),
+                axum::http::Method::PUT,
+                format!("/users/{root}/password"),
+                root_token,
+                json!({"exsitingPassword": "OldPassword1!", "newPassword": "NewPassword2!"}),
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            user_token::Entity::find()
+                .filter(user_token::Column::UserId.eq(root))
+                .all(&db)
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        assert!(matches!(
+            session::valid_stored_refresh(&runtime, &old_refresh).await,
+            Err(crate::error::AppError::Unauthorized(_))
+        ));
     }
 }

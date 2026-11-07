@@ -12,6 +12,7 @@ aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 bcrypt = "0.17"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 jsonwebtoken = "9"
 redis = { version = "0.32", features = ["tokio-comp"] }
 regex = "1"
