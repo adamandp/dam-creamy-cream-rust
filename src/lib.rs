@@ -484,11 +484,8 @@ mod tests {
         let mut role_ids = vec![customer_role, admin_role, root_role];
         role_ids.sort_unstable();
         for (index, expected_id) in role_ids.iter().enumerate() {
-            let (status, result) = request(
-                app.clone(),
-                &format!("/roles?page={}&limit=1", index + 1),
-            )
-            .await;
+            let (status, result) =
+                request(app.clone(), &format!("/roles?page={}&limit=1", index + 1)).await;
             assert_eq!(status, StatusCode::OK);
             assert_eq!(result["data"][0]["id"], expected_id.to_string());
         }
