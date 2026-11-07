@@ -98,7 +98,16 @@ struct DiscountRules<'a> {
 }
 
 fn validate(rules: DiscountRules<'_>) -> AppResult<()> {
-    let DiscountRules { name, value, max_applied, max_redeemed, redeemed_count, quantity, start, end } = rules;
+    let DiscountRules {
+        name,
+        value,
+        max_applied,
+        max_redeemed,
+        redeemed_count,
+        quantity,
+        start,
+        end,
+    } = rules;
     require_text(name, 1, 50, "name")?;
     if let Some(value) = value {
         require_positive(value, 0.0, 1_000_000_000.0, "value")?;

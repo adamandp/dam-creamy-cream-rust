@@ -106,7 +106,18 @@ struct VoucherRules<'a> {
 }
 
 fn validate(rules: VoucherRules<'_>) -> AppResult<()> {
-    let VoucherRules { code, name, description, value, minimum, quantity, max, redeemed, start, end } = rules;
+    let VoucherRules {
+        code,
+        name,
+        description,
+        value,
+        minimum,
+        quantity,
+        max,
+        redeemed,
+        start,
+        end,
+    } = rules;
     require_text(code, 1, 50, "code")?;
     require_text(name, 1, 50, "name")?;
     if let Some(v) = description {
@@ -243,7 +254,8 @@ async fn update(
     validate(VoucherRules {
         code: b.code.as_deref().unwrap_or(&m.code),
         name: b.name.as_deref().unwrap_or(&m.name),
-        description: b.description
+        description: b
+            .description
             .as_ref()
             .map(|v| v.as_deref())
             .unwrap_or(m.description.as_deref()),
