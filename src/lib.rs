@@ -67,8 +67,8 @@ mod tests {
     };
     use chrono::Utc;
     use sea_orm::{
-        ActiveModelTrait, ActiveValue::Set, ColumnTrait, Database, DbBackend, EntityTrait,
-        MockDatabase, QueryFilter, Statement,
+        ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, Database, DbBackend,
+        EntityTrait, MockDatabase, QueryFilter, Statement,
     };
     use serde_json::{Value, json};
     use tower::ServiceExt;
