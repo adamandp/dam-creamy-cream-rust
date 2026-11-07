@@ -481,7 +481,7 @@ mod tests {
         // The fixture assigns identical created_at timestamps to every role
         // and user. This catches offset pagination without a deterministic
         // UUID tie-breaker, including across consecutive page requests.
-        let mut role_ids = vec![customer_role, admin_role, root_role];
+        let mut role_ids = [customer_role, admin_role, root_role];
         role_ids.sort_unstable();
         for (index, expected_id) in role_ids.iter().enumerate() {
             let (status, result) =
@@ -489,7 +489,7 @@ mod tests {
             assert_eq!(status, StatusCode::OK);
             assert_eq!(result["data"][0]["id"], expected_id.to_string());
         }
-        let mut user_ids = vec![owner, stranger, administrator, root];
+        let mut user_ids = [owner, stranger, administrator, root];
         user_ids.sort_unstable();
         for (index, expected_id) in user_ids.iter().enumerate() {
             let (status, result) = authorized_request(
