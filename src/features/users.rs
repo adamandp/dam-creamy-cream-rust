@@ -484,12 +484,29 @@ async fn remove(
     authorization::authenticate(&state, &headers)
         .await?
         .require_owner_or_admin(id)?;
+    let tx = state.db.begin().await.map_err(AppError::db)?;
+    let row = user::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&tx)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("User"))?;
+    let previous_key = row
+        .image_url
+        .as_deref()
+        .and_then(|value| persisted_image_key(value, id));
     let result = user::Entity::delete_by_id(id)
-        .exec(&state.db)
+        .exec(&tx)
         .await
         .map_err(AppError::db)?;
     if result.rows_affected == 0 {
         return Err(not_found("User"));
+    }
+    tx.commit().await.map_err(AppError::db)?;
+    if let Some(key) = previous_key
+        && let Err(err) = state.storage.delete_image(&key).await
+    {
+        tracing::warn!(error = %err, object_key = key, "deleted user's image cleanup failed");
     }
     Ok(Json(success("deleted", "User")))
 }
@@ -567,11 +584,6 @@ async fn confirm_image(
         .ok_or_else(|| AppError::BadRequest("Invalid image object key".into()))?;
     parse_uuid(asset_id)?;
     let etag = state.storage.verify_image(&input.key).await?;
-    let row = user::Entity::find_by_id(id)
-        .one(&state.db)
-        .await
-        .map_err(AppError::db)?
-        .ok_or_else(|| not_found("User"))?;
     let image_url = format!(
         "{}/media/users/{id}/{asset_id}",
         state.config.public_base_url
@@ -586,19 +598,37 @@ async fn confirm_image(
         .storage
         .copy_verified_image(&input.key, &final_key, &etag)
         .await?;
-    let previous_key = row
-        .image_url
-        .as_deref()
-        .and_then(|value| persisted_image_key(value, id));
-    let mut active: user::ActiveModel = row.into();
-    active.image_url = Set(Some(image_url));
-    active.updated_at = Set(Utc::now().naive_utc());
-    if let Err(err) = active.update(&state.db).await {
-        if let Err(cleanup_err) = state.storage.delete_image(&final_key).await {
-            tracing::warn!(error = %cleanup_err, "could not clean up failed image confirmation");
-        }
-        return Err(AppError::db(err));
+    let write_result: AppResult<Option<String>> = async {
+        let tx = state.db.begin().await.map_err(AppError::db)?;
+        // Re-read under a row lock so simultaneous confirmations cannot orphan
+        // each other's previous images.
+        let row = user::Entity::find_by_id(id)
+            .lock_exclusive()
+            .one(&tx)
+            .await
+            .map_err(AppError::db)?
+            .ok_or_else(|| not_found("User"))?;
+        let previous_key = row
+            .image_url
+            .as_deref()
+            .and_then(|value| persisted_image_key(value, id));
+        let mut active: user::ActiveModel = row.into();
+        active.image_url = Set(Some(image_url));
+        active.updated_at = Set(Utc::now().naive_utc());
+        active.update(&tx).await.map_err(AppError::db)?;
+        tx.commit().await.map_err(AppError::db)?;
+        Ok(previous_key)
     }
+    .await;
+    let previous_key = match write_result {
+        Ok(key) => key,
+        Err(err) => {
+            if let Err(cleanup_err) = state.storage.delete_image(&final_key).await {
+                tracing::warn!(error = %cleanup_err, "could not clean up failed image confirmation");
+            }
+            return Err(err);
+        }
+    };
     for obsolete in [Some(input.key), previous_key].into_iter().flatten() {
         if let Err(err) = state.storage.delete_image(&obsolete).await {
             // The new image is committed, so failing the request would mislead the UI.

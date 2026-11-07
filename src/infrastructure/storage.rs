@@ -196,7 +196,7 @@ fn valid_image_signature(mime: &str, data: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod signature_tests {
     use super::valid_image_signature;
 
     #[test]
