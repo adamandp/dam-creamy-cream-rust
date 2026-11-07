@@ -223,7 +223,10 @@ mod signature_tests {
 
     #[test]
     fn truncated_magic_bytes_are_not_valid_decodable_images() {
-        assert!(!valid_image("image/png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"));
+        assert!(!valid_image(
+            "image/png",
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        ));
         assert!(!valid_image("image/jpeg", &[0xff, 0xd8, 0xff, 1]));
         assert!(!valid_image("image/webp", b"RIFF\x00\x00\x00\x00WEBPVP8 "));
     }

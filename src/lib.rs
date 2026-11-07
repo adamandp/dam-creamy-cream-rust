@@ -724,7 +724,13 @@ mod tests {
             .await,
             StatusCode::OK
         );
-        assert!(user::Entity::find_by_id(stranger).one(&db).await.unwrap().is_none());
+        assert!(
+            user::Entity::find_by_id(stranger)
+                .one(&db)
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         // A user with an order must remain intact, including address history.
         db.execute_raw(Statement::from_sql_and_values(
@@ -745,7 +751,13 @@ mod tests {
             .await,
             StatusCode::CONFLICT
         );
-        assert!(user::Entity::find_by_id(owner).one(&db).await.unwrap().is_some());
+        assert!(
+            user::Entity::find_by_id(owner)
+                .one(&db)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         // Deactivated accounts cannot use either still-valid access or
         // stored refresh tokens; dummy behavior remains development-only.
@@ -803,7 +815,10 @@ mod tests {
                 Request::builder()
                     .method(axum::http::Method::POST)
                     .uri("/sessions/refresh")
-                    .header(axum::http::header::COOKIE, format!("refreshToken={refresh_token}"))
+                    .header(
+                        axum::http::header::COOKIE,
+                        format!("refreshToken={refresh_token}"),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -818,7 +833,9 @@ mod tests {
             .unwrap()
             .unwrap()
             .into();
-        password_user.password = Set(crate::features::auth::hash_password("OldPassword1!".into()).await.unwrap());
+        password_user.password = Set(crate::features::auth::hash_password("OldPassword1!".into())
+            .await
+            .unwrap());
         password_user.update(&db).await.unwrap();
         let (_, old_refresh) = session::create_tokens(
             &runtime,
