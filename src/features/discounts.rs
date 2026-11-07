@@ -86,8 +86,8 @@ pub fn body(m: discount::Model) -> Value {
     json!({"id":m.id,"name":m.name,"discountType":m.discount_type,"value":m.value,"maxApplied":m.max_applied,"maxRedeemed":m.max_redeemed,"redeemedCount":m.redeemed_count,"description":m.description,"productId":m.product_id,"quantity":m.quantity,"startDate":date_time(m.start_date),"endDate":date_time(m.end_date),"createdAt":created_at,"updatedAt":updated_at})
 }
 
-fn validate(
-    name: &str,
+struct DiscountRules<'a> {
+    name: &'a str,
     value: Option<f64>,
     max_applied: i32,
     max_redeemed: i32,
@@ -95,7 +95,10 @@ fn validate(
     quantity: Option<i32>,
     start: chrono::NaiveDateTime,
     end: chrono::NaiveDateTime,
-) -> AppResult<()> {
+}
+
+fn validate(rules: DiscountRules<'_>) -> AppResult<()> {
+    let DiscountRules { name, value, max_applied, max_redeemed, redeemed_count, quantity, start, end } = rules;
     require_text(name, 1, 50, "name")?;
     if let Some(value) = value {
         require_positive(value, 0.0, 1_000_000_000.0, "value")?;
@@ -124,16 +127,16 @@ async fn create(
         .require_admin()?;
     let start = parse_datetime(&b.start_date)?;
     let end = parse_datetime(&b.end_date)?;
-    validate(
-        &b.name,
-        b.value,
-        b.max_applied,
-        b.max_redeemed,
-        b.redeemed_count,
-        b.quantity,
+    validate(DiscountRules {
+        name: &b.name,
+        value: b.value,
+        max_applied: b.max_applied,
+        max_redeemed: b.max_redeemed,
+        redeemed_count: b.redeemed_count,
+        quantity: b.quantity,
         start,
         end,
-    )?;
+    })?;
     if let Some(d) = &b.description {
         require_text(d, 1, 255, "description")?;
     }
@@ -224,16 +227,16 @@ async fn update(
         .map(parse_datetime)
         .transpose()?
         .unwrap_or(m.end_date);
-    validate(
-        b.name.as_deref().unwrap_or(&m.name),
-        b.value.unwrap_or(m.value),
-        b.max_applied.unwrap_or(m.max_applied),
-        b.max_redeemed.unwrap_or(m.max_redeemed),
-        b.redeemed_count.unwrap_or(m.redeemed_count),
-        b.quantity.unwrap_or(m.quantity),
+    validate(DiscountRules {
+        name: b.name.as_deref().unwrap_or(&m.name),
+        value: b.value.unwrap_or(m.value),
+        max_applied: b.max_applied.unwrap_or(m.max_applied),
+        max_redeemed: b.max_redeemed.unwrap_or(m.max_redeemed),
+        redeemed_count: b.redeemed_count.unwrap_or(m.redeemed_count),
+        quantity: b.quantity.unwrap_or(m.quantity),
         start,
         end,
-    )?;
+    })?;
     if let Some(Some(d)) = &b.description {
         require_text(d, 1, 255, "description")?;
     }

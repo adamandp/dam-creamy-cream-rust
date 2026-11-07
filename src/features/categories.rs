@@ -98,18 +98,18 @@ async fn list(
 ) -> AppResult<Json<Value>> {
     let (page, limit) = query.checked()?;
     let mut version = 0_i64;
-    if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
-        if let Ok(Some(v)) = conn.get::<_, Option<i64>>("categories:version").await {
-            version = v;
-        }
+    if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await
+        && let Ok(Some(v)) = conn.get::<_, Option<i64>>("categories:version").await
+    {
+        version = v;
     }
     let key = format!("categories:{version}:{page}:{limit}");
     if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
         let cached: redis::RedisResult<Option<String>> = conn.get(&key).await;
-        if let Ok(Some(value)) = cached {
-            if let Ok(result) = serde_json::from_str::<Value>(&value) {
-                return Ok(Json(result));
-            }
+        if let Ok(Some(value)) = cached
+            && let Ok(result) = serde_json::from_str::<Value>(&value)
+        {
+            return Ok(Json(result));
         }
     }
     let total = category::Entity::find()

@@ -100,10 +100,9 @@ pub fn current_image_url(stored: Option<String>, id: Uuid, public_base: &str) ->
         if let Some(asset) = url
             .rsplit_once(&format!("/media/products/{id}/"))
             .map(|(_, s)| s)
+            && Uuid::parse_str(asset).is_ok()
         {
-            if Uuid::parse_str(asset).is_ok() {
-                return format!("{public_base}/media/products/{id}/{asset}");
-            }
+            return format!("{public_base}/media/products/{id}/{asset}");
         }
         url
     })
@@ -242,10 +241,10 @@ async fn catalog(
     if let Some(v) = &q.q {
         require_text(v, 1, 100, "q")?;
     }
-    if let Some(v) = &q.sort {
-        if !matches!(v.as_str(), "asc" | "desc" | "default") {
-            return Err(AppError::BadRequest("Invalid sort".into()));
-        }
+    if let Some(v) = &q.sort
+        && !matches!(v.as_str(), "asc" | "desc" | "default")
+    {
+        return Err(AppError::BadRequest("Invalid sort".into()));
     }
     if let Some(v) = &q.cat {
         require_text(v, 1, 100, "cat")?;
@@ -335,15 +334,14 @@ async fn update(
             .unwrap_or(m.description.as_deref()),
         b.price.unwrap_or(m.price),
     )?;
-    if let Some(cat) = b.category_id {
-        if category::Entity::find_by_id(cat)
+    if let Some(cat) = b.category_id
+        && category::Entity::find_by_id(cat)
             .one(&s.db)
             .await
             .map_err(AppError::db)?
             .is_none()
-        {
-            return Err(not_found("category"));
-        }
+    {
+        return Err(not_found("category"));
     }
     reject_no_change(&[
         b.category_id.map(|v| v == m.category_id),
@@ -395,10 +393,10 @@ async fn remove(
         .exec(&s.db)
         .await
         .map_err(AppError::db)?;
-    if let Some(key) = previous.image_url.as_deref().and_then(|v| image_key(v, id)) {
-        if let Err(err) = s.storage.delete_image(&key).await {
-            tracing::warn!(error=%err,"product image cleanup failed");
-        }
+    if let Some(key) = previous.image_url.as_deref().and_then(|v| image_key(v, id))
+        && let Err(err) = s.storage.delete_image(&key).await
+    {
+        tracing::warn!(error=%err,"product image cleanup failed");
     }
     Ok(Json(success("deleted", "Product")))
 }

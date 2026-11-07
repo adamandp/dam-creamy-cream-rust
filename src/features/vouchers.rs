@@ -92,10 +92,10 @@ pub fn body(m: voucher::Model) -> Value {
     let (created_at, updated_at) = timestamps(m.created_at, m.updated_at);
     json!({"id":m.id,"code":m.code,"name":m.name,"description":m.description,"type":m.r#type,"group":m.group,"value":m.value,"productId":m.product_id,"quantity":m.quantity,"minimumPurchase":m.minimum_purchase,"isActive":m.is_active,"startDate":date_time(m.start_date),"endDate":date_time(m.end_date),"maxRedeemed":m.max_redeemed,"redeemedCount":m.redeemed_count,"createdAt":created_at,"updatedAt":updated_at})
 }
-fn validate(
-    code: &str,
-    name: &str,
-    description: Option<&str>,
+struct VoucherRules<'a> {
+    code: &'a str,
+    name: &'a str,
+    description: Option<&'a str>,
     value: Option<f64>,
     minimum: f64,
     quantity: Option<i32>,
@@ -103,7 +103,10 @@ fn validate(
     redeemed: i32,
     start: chrono::NaiveDateTime,
     end: chrono::NaiveDateTime,
-) -> AppResult<()> {
+}
+
+fn validate(rules: VoucherRules<'_>) -> AppResult<()> {
+    let VoucherRules { code, name, description, value, minimum, quantity, max, redeemed, start, end } = rules;
     require_text(code, 1, 50, "code")?;
     require_text(name, 1, 50, "name")?;
     if let Some(v) = description {
@@ -130,27 +133,26 @@ async fn create(
         .require_admin()?;
     let start = parse_datetime(&b.start_date)?;
     let end = parse_datetime(&b.end_date)?;
-    validate(
-        &b.code,
-        &b.name,
-        b.description.as_deref(),
-        b.value,
-        b.minimum_purchase,
-        b.quantity,
-        b.max_redeemed,
-        b.redeemed_count,
+    validate(VoucherRules {
+        code: &b.code,
+        name: &b.name,
+        description: b.description.as_deref(),
+        value: b.value,
+        minimum: b.minimum_purchase,
+        quantity: b.quantity,
+        max: b.max_redeemed,
+        redeemed: b.redeemed_count,
         start,
         end,
-    )?;
-    if let Some(id) = b.product_id {
-        if product::Entity::find_by_id(id)
+    })?;
+    if let Some(id) = b.product_id
+        && product::Entity::find_by_id(id)
             .one(&s.db)
             .await
             .map_err(AppError::db)?
             .is_none()
-        {
-            return Err(not_found("Product"));
-        }
+    {
+        return Err(not_found("Product"));
     }
     let now = Utc::now().naive_utc();
     voucher::ActiveModel {
@@ -238,30 +240,29 @@ async fn update(
         .map(parse_datetime)
         .transpose()?
         .unwrap_or(m.end_date);
-    validate(
-        b.code.as_deref().unwrap_or(&m.code),
-        b.name.as_deref().unwrap_or(&m.name),
-        b.description
+    validate(VoucherRules {
+        code: b.code.as_deref().unwrap_or(&m.code),
+        name: b.name.as_deref().unwrap_or(&m.name),
+        description: b.description
             .as_ref()
             .map(|v| v.as_deref())
             .unwrap_or(m.description.as_deref()),
-        b.value.unwrap_or(m.value),
-        b.minimum_purchase.unwrap_or(m.minimum_purchase),
-        b.quantity.unwrap_or(m.quantity),
-        b.max_redeemed.unwrap_or(m.max_redeemed),
-        b.redeemed_count.unwrap_or(m.redeemed_count),
+        value: b.value.unwrap_or(m.value),
+        minimum: b.minimum_purchase.unwrap_or(m.minimum_purchase),
+        quantity: b.quantity.unwrap_or(m.quantity),
+        max: b.max_redeemed.unwrap_or(m.max_redeemed),
+        redeemed: b.redeemed_count.unwrap_or(m.redeemed_count),
         start,
         end,
-    )?;
-    if let Some(Some(id)) = b.product_id {
-        if product::Entity::find_by_id(id)
+    })?;
+    if let Some(Some(id)) = b.product_id
+        && product::Entity::find_by_id(id)
             .one(&s.db)
             .await
             .map_err(AppError::db)?
             .is_none()
-        {
-            return Err(not_found("Product"));
-        }
+    {
+        return Err(not_found("Product"));
     }
     reject_no_change(&[
         b.code.as_ref().map(|v| v == &m.code),
