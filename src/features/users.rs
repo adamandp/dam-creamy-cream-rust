@@ -725,7 +725,7 @@ async fn confirm_image(
             .copy_verified_image(&input.key, &final_key, &etag)
             .await?;
         let mut active: user::ActiveModel = row.into();
-        active.image_url = Set(Some(image_url));
+        active.image_url = Set(Some(image_url.clone()));
         active.updated_at = Set(Utc::now().naive_utc());
         active.update(&tx).await.map_err(AppError::db)?;
         tx.commit().await.map_err(AppError::db)?;
