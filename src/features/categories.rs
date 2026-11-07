@@ -57,14 +57,10 @@ pub fn body(m: category::Model) -> Value {
 }
 
 async fn invalidate(state: &AppState) {
-    // Cache is a read optimization. A failure must not roll back a successful database write.
+    // Versioned cache keys make invalidation O(1) and avoid blocking Redis with KEYS.
+    // Older versions expire naturally after their one-hour TTL.
     if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
-        let cursor: redis::RedisResult<Vec<String>> = conn.keys("categories:*").await;
-        if let Ok(keys) = cursor {
-            if !keys.is_empty() {
-                let _: redis::RedisResult<()> = conn.del(keys).await;
-            }
-        }
+        let _: redis::RedisResult<i64> = conn.incr("categories:version", 1).await;
     }
 }
 
@@ -101,7 +97,13 @@ async fn list(
     ApiQuery(query): ApiQuery<Pagination>,
 ) -> AppResult<Json<Value>> {
     let (page, limit) = query.checked()?;
-    let key = format!("categories:{page}:{limit}");
+    let mut version = 0_i64;
+    if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
+        if let Ok(Some(v)) = conn.get::<_, Option<i64>>("categories:version").await {
+            version = v;
+        }
+    }
+    let key = format!("categories:{version}:{page}:{limit}");
     if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
         let cached: redis::RedisResult<Option<String>> = conn.get(&key).await;
         if let Ok(Some(value)) = cached {

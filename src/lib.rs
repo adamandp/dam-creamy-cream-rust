@@ -7,6 +7,9 @@ pub mod features;
 pub mod infrastructure;
 pub mod state;
 
+#[cfg(test)]
+mod pr2_tests;
+
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
