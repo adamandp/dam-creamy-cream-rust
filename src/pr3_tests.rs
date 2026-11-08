@@ -389,8 +389,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
     )
     .await
     .unwrap();
-    let (cookie_status, cookie_body) =
-        send_cookie(app.clone(), "/carts/user", &refresh).await;
+    let (cookie_status, cookie_body) = send_cookie(app.clone(), "/carts/user", &refresh).await;
     assert_eq!(cookie_status, StatusCode::OK);
     assert_eq!(cookie_body["data"][0]["qty"], 5);
     let (forged_status, _) = send_cookie(app.clone(), "/carts/user", "forged").await;
