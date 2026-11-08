@@ -275,6 +275,17 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(catalog["data"][0]["discountPrice"], 9000.0);
     assert_eq!(catalog["data"][0]["discountType"], "PERCENTAGE");
+    let (status, paged_catalog) = send(
+        app.clone(),
+        Method::GET,
+        "/products/catalog?page=1&limit=10",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(paged_catalog["paging"]["currentPage"], 1);
+    assert_eq!(paged_catalog["paging"]["pageSize"], 10);
     let (status, details) = send(
         app.clone(),
         Method::GET,

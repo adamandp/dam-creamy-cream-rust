@@ -69,8 +69,10 @@ pub struct CatalogQuery {
     cat: Option<String>,
     min: Option<f64>,
     max: Option<f64>,
-    #[serde(flatten)]
-    pagination: Pagination,
+    // serde_urlencoded cannot deserialize numeric values through a flattened
+    // struct here; keeping them at the top level supports ?page=1&limit=10.
+    page: Option<i64>,
+    limit: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -236,7 +238,11 @@ async fn catalog(
     State(s): State<AppState>,
     ApiQuery(q): ApiQuery<CatalogQuery>,
 ) -> AppResult<Json<Value>> {
-    let (page, limit) = q.pagination.checked()?;
+    let (page, limit) = Pagination {
+        page: q.page,
+        limit: q.limit,
+    }
+    .checked()?;
     if let Some(v) = &q.q {
         require_text(v, 1, 100, "q")?;
     }
