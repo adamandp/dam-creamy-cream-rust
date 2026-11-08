@@ -223,5 +223,67 @@ await compare('address strict extra fields', '/addresses', 'POST', { ...addressC
 await compare('user fullName accepts punctuation', `/users/${ids.user}`, 'PATCH', { fullName: 'Parity Admin, Jr.' });
 await compare('user fullName after PATCH', `/users/${ids.user}`, 'GET', undefined, { ignoreUpdatedAt: true });
 
+// Writes that generate IDs on both databases cannot be compared by raw IDs.
+// Fetch them back from the persisted collections and assert every business
+// field matches, ignoring only IDs and write-generated timestamps.
+async function compareCreatedRows(label, path, selected) {
+  const [nest, rust] = await Promise.all([invoke(nestBase, path), invoke(rustBase, path)]);
+  const project = (result) => (Array.isArray(result.data?.data) ? result.data.data : [])
+    .filter(selected)
+    .map(({ id, createdAt, updatedAt, ...fields }) => comparable(fields))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const nRows = project(nest);
+  const rRows = project(rust);
+  if (nest.status === 200 && rust.status === 200 && nRows.length > 0 && isDeepStrictEqual(nRows, rRows)) {
+    console.log(`PASS ${label} (${nRows.length} persisted records)`);
+    passed++;
+  } else {
+    console.error(`FAIL ${label}: Nest ${nest.status} ${JSON.stringify(nRows)}, Rust ${rust.status} ${JSON.stringify(rRows)}`);
+    failed++;
+  }
+}
+await compareCreatedRows('category creates persist identical fields', '/categories?page=1&limit=100', (row) => ['Cream New', 'Cream Nullable'].includes(row.name));
+await compareCreatedRows('discount creates persist identical fields', '/discounts?page=1&limit=100', (row) => ['Cream Sale', 'Cream Date Sale'].includes(row.name));
+await compareCreatedRows('voucher create persists identical fields', '/vouchers?page=1&limit=100', (row) => row.code === 'CREAM-PARITY');
+await compareCreatedRows('review create persists identical fields', `/reviews/product/${ids.product}?page=1&limit=100`, (row) => row.comment === null && row.rate === 4);
+await compareCreatedRows('user voucher create persists identical fields', '/user-vouchers?page=1&limit=100', (row) => row.expiredAt === '2026-12-08T00:00:00.000Z');
+await compareCreatedRows('address boolean coercion persists identical fields', '/addresses?page=1&limit=100', (row) => row.recipientName === 'Parity');
+
+async function compareDeleteCreated(label, collection, resourcePath, matching, soft = false) {
+  const [nestList, rustList] = await Promise.all([invoke(nestBase, collection), invoke(rustBase, collection)]);
+  const nestId = nestList.data?.data?.find(matching)?.id;
+  const rustId = rustList.data?.data?.find(matching)?.id;
+  if (!nestId || !rustId) {
+    console.error(`FAIL ${label}: created record missing in one database`);
+    failed++;
+    return;
+  }
+  const [nest, rust] = await Promise.all([
+    invoke(nestBase, `${resourcePath}/${nestId}`, 'DELETE'),
+    invoke(rustBase, `${resourcePath}/${rustId}`, 'DELETE'),
+  ]);
+  const [nestAfter, rustAfter] = await Promise.all([
+    invoke(nestBase, `${resourcePath}/${nestId}`),
+    invoke(rustBase, `${resourcePath}/${rustId}`),
+  ]);
+  const afterMatches = soft
+    ? nestAfter.status === 200 && rustAfter.status === 200 &&
+      nestAfter.data?.data?.isActive === false && rustAfter.data?.data?.isActive === false
+    : nestAfter.status === rustAfter.status && nestAfter.status >= 400;
+  if (nest.status === 200 && rust.status === 200 && isDeepStrictEqual(nest.data, rust.data) && afterMatches) {
+    console.log(`PASS ${label} (delete and readback)`);
+    passed++;
+  } else {
+    console.error(`FAIL ${label}: Nest ${nest.status} ${JSON.stringify(nest.data)}, Rust ${rust.status} ${JSON.stringify(rust.data)}; readback ${nestAfter.status}/${rustAfter.status}`);
+    failed++;
+  }
+}
+await compareDeleteCreated('category hard delete', '/categories?page=1&limit=100', '/categories', (row) => row.name === 'Cream New');
+await compareDeleteCreated('discount hard delete', '/discounts?page=1&limit=100', '/discounts', (row) => row.name === 'Cream Date Sale');
+await compareDeleteCreated('voucher soft delete', '/vouchers?page=1&limit=100', '/vouchers', (row) => row.code === 'CREAM-PARITY', true);
+await compareDeleteCreated('review hard delete', `/reviews/product/${ids.product}?page=1&limit=100`, '/reviews', (row) => row.comment === null && row.rate === 4);
+await compare('product discount soft delete', `/product-discounts/${ids.productDiscount}`, 'DELETE');
+await compare('product discount after soft delete', `/product-discounts/${ids.productDiscount}`, 'GET', undefined, { ignoreUpdatedAt: true });
+
 console.log(`\nNestJS ↔ Axum differential: ${passed} matched, ${failed} mismatched, ${passed + failed} scenarios.`);
 if (failed) process.exitCode = 1;

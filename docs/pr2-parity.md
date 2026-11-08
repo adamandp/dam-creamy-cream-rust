@@ -74,7 +74,9 @@ not considered equivalent unless called out below.
 - The differential matrix covers the original 28 GET scenarios, 16 additional
   PATCH/readback/cache-staleness cases, plus catalog query variants and
   negative/positive Zod DTO cases (unknown keys, required-nullable fields,
-  strict objects, coercion and date-only values). It intentionally excludes
+  strict objects, coercion and date-only values), plus normalized DB
+  readbacks after create, hard delete, and soft-deactivation operations.
+  It intentionally excludes
   legacy broken controller decorators, different authorization rules, and
   the agreed upload change.
 - CI also boots an isolated MinIO instance and executes the storage integration
