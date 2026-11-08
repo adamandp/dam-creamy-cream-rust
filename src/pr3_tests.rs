@@ -69,6 +69,25 @@ async fn send(
     )
 }
 
+async fn send_cookie(app: axum::Router, path: &str, refresh: &str) -> (StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .header("Cookie", format!("refreshToken={refresh}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
 #[test]
 fn checkout_schema_is_compatible_with_nest_dto() {
     let valid = json!({"order":{"userId":Uuid::new_v4(),"addressId":Uuid::new_v4(),"voucherIds":null},
@@ -146,6 +165,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
         "CREATE TYPE \"SHIPMENT_STATUS\" AS ENUM ('PENDING','SHIPPED','DELIVERED','CANCELLED')",
         "CREATE TABLE roles (id UUID PRIMARY KEY,name VARCHAR(50) NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE users (id UUID PRIMARY KEY,role_id UUID NOT NULL REFERENCES roles(id),username VARCHAR(50) NOT NULL,email VARCHAR(255),phone_number VARCHAR(100),password VARCHAR(255) NOT NULL,full_name VARCHAR(100) NOT NULL,birth_date DATE,image_url VARCHAR(255),gender \"GENDER_TYPE\",is_active BOOLEAN NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
+        "CREATE TABLE user_tokens (id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id),token VARCHAR(255) NOT NULL UNIQUE,\"browserInfo\" TEXT NOT NULL,\"expiredAt\" TIMESTAMP NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE addresses (id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id),recipient_name VARCHAR(100) NOT NULL,recipient_phone_number VARCHAR(100) NOT NULL,province VARCHAR(100) NOT NULL,city VARCHAR(100) NOT NULL,subdistrict VARCHAR(100) NOT NULL,village VARCHAR(100) NOT NULL,postal_code VARCHAR(50) NOT NULL,address VARCHAR(255) NOT NULL,is_primary BOOLEAN NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE category (id UUID PRIMARY KEY,name VARCHAR(100) NOT NULL,description VARCHAR(255),is_active BOOLEAN NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE products (id UUID PRIMARY KEY,category_id UUID NOT NULL REFERENCES category(id),discount_id UUID,name VARCHAR(100) NOT NULL,image_url VARCHAR(255),description VARCHAR(255),price DOUBLE PRECISION NOT NULL,is_active BOOLEAN NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
@@ -357,6 +377,27 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
     let (status, body) = send(app.clone(), Method::GET, "/carts/user", Some(&token), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"][0]["qty"], 5);
+
+    // An existing Nest client sends only the refreshToken cookie for cart
+    // routes; Rust must accept the same legitimate session without a Bearer.
+    let (_, refresh) = session::create_tokens(
+        &state,
+        &user_id.to_string(),
+        &role_id.to_string(),
+        None,
+        "integration-browser".into(),
+    )
+    .await
+    .unwrap();
+    let (cookie_status, cookie_body) =
+        send_cookie(app.clone(), "/carts/user", &refresh).await;
+    assert_eq!(cookie_status, StatusCode::OK);
+    assert_eq!(cookie_body["data"][0]["qty"], 5);
+    let (forged_status, _) = send_cookie(app.clone(), "/carts/user", "forged").await;
+    assert_eq!(forged_status, StatusCode::UNAUTHORIZED);
+    session::clear_token(&state, &refresh).await.unwrap();
+    let (revoked_status, _) = send_cookie(app.clone(), "/carts/user", &refresh).await;
+    assert_eq!(revoked_status, StatusCode::UNAUTHORIZED);
 
     let payload = json!({"order":{"userId":user_id,"addressId":address_id,"voucherIds":[voucher_id,voucher_id]},
         "orderItems":[{"productId":product_id,"discountId":discount_id,"quantity":2}],

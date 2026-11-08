@@ -1,4 +1,5 @@
 use axum::http::HeaderMap;
+use axum_extra::extract::cookie::CookieJar;
 use sea_orm::EntityTrait;
 use uuid::Uuid;
 
@@ -51,7 +52,21 @@ impl Actor {
 }
 
 pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Actor> {
-    let claims = session::bearer(headers, &state.config)?;
+    // Nest's @CurrentUser takes the session from the refreshToken cookie.
+    // Accept that existing client contract as well as the new access Bearer
+    // token, but verify the refresh signature and its stored session instead
+    // of copying Nest's unsafe, unsigned jwt.decode behavior.
+    let claims = if headers.contains_key(axum::http::header::AUTHORIZATION) {
+        session::bearer(headers, &state.config)?
+    } else {
+        let jar = CookieJar::from_headers(headers);
+        let token = jar.get("refreshToken").ok_or_else(|| {
+            AppError::Unauthorized(
+                "🚪 You are not logged in. Please sign in to continue! 🔐".into(),
+            )
+        })?;
+        session::valid_stored_refresh(state, token.value()).await?
+    };
     let id = Uuid::parse_str(&claims.sub)
         .map_err(|_| AppError::Unauthorized("Invalid access token subject".into()))?;
     let current_user = user::Entity::find_by_id(id)

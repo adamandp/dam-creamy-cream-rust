@@ -18,10 +18,10 @@ const now=Math.floor(Date.now()/1000);
 const unsigned=`${b64({alg:'HS256',typ:'JWT'})}.${b64({sub:id.user,role:id.role,iat:now,exp:now+900})}`;
 const token=`${unsigned}.${createHmac('sha256',secret).update(unsigned).digest('base64url')}`;
 
-async function invoke(base,method,path,body) {
+async function invoke(base,method,path,body,authenticated=true) {
   const response=await fetch(`${base}${path}`,{
-    method,headers:{Authorization:`Bearer ${token}`,
-      Cookie:`refreshToken=${token}`,
+    method,headers:{...(authenticated?{Authorization:`Bearer ${token}`,
+      Cookie:`refreshToken=${token}`} : {}),
       ...(body===undefined?{}:{'Content-Type':'application/json'})},
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(15000),
   });
@@ -40,8 +40,8 @@ const comparable=(v,skipTimestamp=false)=> {
 };
 
 let passed=0,failed=0;
-async function compare(label,method,path,body,skipTimestamp=false) {
-  const [nest,rust]=await Promise.all(bases.map(base=>invoke(base,method,path,body)));
+async function compare(label,method,path,body,skipTimestamp=false,authenticated=true) {
+  const [nest,rust]=await Promise.all(bases.map(base=>invoke(base,method,path,body,authenticated)));
   if (nest.status===rust.status && isDeepStrictEqual(comparable(nest.data,skipTimestamp),comparable(rust.data,skipTimestamp))) {
     console.log(`PASS PR3 ${label} (${nest.status})`);passed++;
   } else {
@@ -50,6 +50,7 @@ async function compare(label,method,path,body,skipTimestamp=false) {
 }
 
 await compare('cart initial','GET','/carts/user?page=1&limit=10');
+await compare('cart missing session','GET','/carts/user?page=1&limit=10',undefined,false,false);
 await compare('cart add','POST','/carts/user/add',{productId:id.product,quantity:2});
 await compare('cart increment readback','GET','/carts/user?page=1&limit=10');
 await compare('cart remove','POST','/carts/user/remove',{productId:id.product,quantity:3});
@@ -59,6 +60,7 @@ await compare('cart missing product','POST','/carts/user/add',
 await compare('shipments list','GET','/shipments?page=1&limit=10');
 await compare('shipments detail','GET',`/shipments/${id.shipment}`);
 await compare('shipments status update','PATCH',`/shipments/${id.shipment}/status`,{status:'SHIPPED'});
+await compare('shipments anonymous status update','PATCH',`/shipments/${id.shipment}/status`,{status:'DELIVERED'},false,false);
 await compare('shipments updated detail','GET',`/shipments/${id.shipment}`,undefined,true);
 await compare('RajaOngkir unavailable upstream','POST','/shipments/cost',{origin:1,destination:2,weight:1000});
 for (const [label,method,path,body] of [

@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     routing::{get, post},
 };
 use chrono::Utc;
@@ -11,10 +11,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, Q
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{
-    authorization,
-    catalog_common::{collection, detail},
-};
+use super::catalog_common::{collection, detail};
 use crate::{
     common::{Pagination, date_time, not_found, parse_uuid, plain_not_found, success},
     entity::shipment::{self, ShipmentStatus},
@@ -95,12 +92,10 @@ async fn one(State(s): State<AppState>, Path(id): Path<String>) -> AppResult<Jso
 async fn update_status(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    headers: HeaderMap,
     ApiJson(req): ApiJson<UpdateStatus>,
 ) -> AppResult<Json<Value>> {
-    authorization::authenticate(&s, &headers)
-        .await?
-        .require_admin()?;
+    // The Nest ShipmentsController exposes PATCH :id/status without an auth
+    // decorator or role guard. Preserve that HTTP contract in this rewrite.
     let m = shipment::Entity::find_by_id(parse_uuid(&id)?)
         .one(&s.db)
         .await
