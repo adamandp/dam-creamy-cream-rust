@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use axum::{Json, Router, extract::{Path, State}, http::HeaderMap, routing::{get, post}};
+use axum::{Json, Router, extract::{Path, State}, http::{HeaderMap,StatusCode}, routing::{get, post}};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, QuerySelect};
 use serde::Deserialize;
@@ -74,7 +74,7 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(||reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().expect("valid HTTP client"))
 }
 
-async fn cost(ApiJson(req):ApiJson<CostInput>) -> AppResult<Json<Value>> {
+async fn cost(ApiJson(req):ApiJson<CostInput>) -> AppResult<(StatusCode,Json<Value>)> {
     let failure = ||AppError::ExternalService("❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into());
     let url=std::env::var("RAJAONGKIR_BASE_URL").map_err(|_|failure())?;
     let key=std::env::var("RAJAONGKIR_API_KEY").map_err(|_|failure())?;
@@ -85,7 +85,7 @@ async fn cost(ApiJson(req):ApiJson<CostInput>) -> AppResult<Json<Value>> {
         .send().await.map_err(|e|{tracing::error!(error=%e,"RajaOngkir request failed");failure()})?;
     let response=response.error_for_status().map_err(|e|{tracing::error!(error=%e,"RajaOngkir rejected request");failure()})?;
     let payload:Value=response.json().await.map_err(|e|{tracing::error!(error=%e,"Invalid RajaOngkir response");failure()})?;
-    Ok(Json(json!({"message":payload["meta"]["message"],"status":payload["meta"]["code"],"data":payload["data"]})))
+    Ok((StatusCode::CREATED,Json(json!({"message":payload["meta"]["message"],"status":payload["meta"]["code"],"data":payload["data"]}))))
 }
 
 #[cfg(test)]

@@ -70,7 +70,7 @@ async fn add(
 
 async fn remove(
     State(s): State<AppState>, headers: HeaderMap, ApiJson(input): ApiJson<CartInput>,
-) -> AppResult<Json<Value>> {
+) -> AppResult<(StatusCode, Json<Value>)> {
     let actor = authorization::authenticate(&s, &headers).await?;
     validate_quantity(input.quantity)?;
     if product::Entity::find_by_id(input.product_id).one(&s.db).await.map_err(AppError::db)?.is_none() {
@@ -91,7 +91,8 @@ async fn remove(
         row.update(&tx).await.map_err(AppError::db)?;
     }
     tx.commit().await.map_err(AppError::db)?;
-    Ok(Json(success("deleted", "Cart")))
+    // NestJS @Post without @HttpCode returns 201 even on a delete-like action.
+    Ok((StatusCode::CREATED, Json(success("deleted", "Cart"))))
 }
 
 async fn by_user(

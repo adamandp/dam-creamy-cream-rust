@@ -1,10 +1,10 @@
 //! The NestJS PaymentsController is still a generated scaffold. Preserve its
 //! literal responses; do not invent payment operations before PR4/5.
-use axum::{Router, routing::get};
+use axum::{Router, http::StatusCode, routing::get};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/", get(|| async {"This action returns all payments"}).post(|| async {"This action adds a new payment"}))
+    Router::new().route("/", get(|| async {"This action returns all payments"}).post(|| async {(StatusCode::CREATED,"This action adds a new payment")}))
         .route("/{id}", get(one).patch(update).delete(remove))
 }
 
