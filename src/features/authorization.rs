@@ -61,7 +61,7 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Ac
     } else {
         let jar = CookieJar::from_headers(headers);
         let token = jar.get("refreshToken").ok_or_else(|| {
-            AppError::Unauthorized(
+            AppError::PlainUnauthorized(
                 "🚪 You are not logged in. Please sign in to continue! 🔐".into(),
             )
         })?;

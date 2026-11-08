@@ -12,6 +12,10 @@ pub enum AppError {
     BadRequest(String),
     #[error("{0}")]
     Unauthorized(String),
+    // Nest's custom UnauthorizedException extends HttpException with a plain
+    // string body; the response omits the built-in `error` field.
+    #[error("{0}")]
+    PlainUnauthorized(String),
     #[error("{0}")]
     Forbidden(String),
     #[error("{0}")]
@@ -60,12 +64,21 @@ impl IntoResponse for AppError {
             )
                 .into_response();
         }
+        if let Self::PlainUnauthorized(message) = self {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"statusCode":401,"message":message})),
+            )
+                .into_response();
+        }
         let (status, error, message) = match self {
             Self::BadRequest(s) => (StatusCode::BAD_REQUEST, "Bad Request", s),
             Self::Unauthorized(s) => (StatusCode::UNAUTHORIZED, "Unauthorized", s),
             Self::Forbidden(s) => (StatusCode::FORBIDDEN, "Forbidden", s),
             Self::NotFound(s) => (StatusCode::NOT_FOUND, "Not Found", s),
-            Self::PlainNotFound(_) | Self::Validation(_) => unreachable!(),
+            Self::PlainNotFound(_) | Self::PlainUnauthorized(_) | Self::Validation(_) => {
+                unreachable!()
+            }
             Self::Conflict(s) => (StatusCode::CONFLICT, "Conflict", s),
             Self::Internal(s) => {
                 tracing::error!(error = %s, "internal request failure");
