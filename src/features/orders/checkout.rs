@@ -401,19 +401,7 @@ pub async fn execute(state: &AppState, input: CheckoutInput) -> AppResult<Value>
         .await
         .map_err(AppError::db)?;
     }
-    // FREE_ITEM discounts and vouchers generate additional order items at zero price.
-    for d in &discounts {
-        if d.discount_type != DiscountType::FreeItem {
-            continue;
-        }
-        let product_id = d
-            .product_id
-            .ok_or_else(|| AppError::BadRequest("Free item discount requires productId".into()))?;
-        let quantity = d
-            .quantity
-            .ok_or_else(|| AppError::BadRequest("Free item discount requires quantity".into()))?;
-        insert_free_item(&tx, order_id, product_id, quantity, now).await?;
-    }
+    // Nest creates FREE_ITEM voucher rows before FREE_ITEM discount rows.
     for v in &vouchers {
         if v.r#type != VoucherType::FreeItem {
             continue;
@@ -424,6 +412,18 @@ pub async fn execute(state: &AppState, input: CheckoutInput) -> AppResult<Value>
         let quantity = v
             .quantity
             .ok_or_else(|| AppError::BadRequest("Free item voucher requires quantity".into()))?;
+        insert_free_item(&tx, order_id, product_id, quantity, now).await?;
+    }
+    for d in &discounts {
+        if d.discount_type != DiscountType::FreeItem {
+            continue;
+        }
+        let product_id = d
+            .product_id
+            .ok_or_else(|| AppError::BadRequest("Free item discount requires productId".into()))?;
+        let quantity = d
+            .quantity
+            .ok_or_else(|| AppError::BadRequest("Free item discount requires quantity".into()))?;
         insert_free_item(&tx, order_id, product_id, quantity, now).await?;
     }
     for id in voucher_ids {

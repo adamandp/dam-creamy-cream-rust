@@ -294,6 +294,7 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
         id: Set(Uuid::new_v4()),
         product_id: Set(product.id),
         quantity: Set(3),
+        ..Default::default()
     }
     .insert(&db)
     .await
