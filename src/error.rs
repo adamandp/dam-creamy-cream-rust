@@ -26,6 +26,8 @@ pub enum AppError {
     Conflict(String),
     #[error("internal server error: {0}")]
     Internal(String),
+    #[error("{0}")]
+    ExternalService(String),
 }
 
 impl AppError {
@@ -73,6 +75,7 @@ impl IntoResponse for AppError {
                     "Internal server error".to_owned(),
                 )
             }
+            Self::ExternalService(s) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error", s),
         };
         (
             status,

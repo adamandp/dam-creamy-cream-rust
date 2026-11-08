@@ -1,5 +1,11 @@
 name: Rust CI
 
+# PR3 bootstrap only: let the CI Rust toolchain normalize the new source files
+# and lockfile once. This permission and step are removed after the generated
+# commit has been retrieved and verified.
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main, 'feat/**']
@@ -39,6 +45,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Format PR3 and generate lockfile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/pr3-commerce-checkout'
+        run: |
+          cargo generate-lockfile
+          cargo fmt --all
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add Cargo.lock src Cargo.toml
+            git commit -m 'chore(pr3): normalize formatting and dependency lockfile'
+            git push origin HEAD:feat/pr3-commerce-checkout
+          fi
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-go@v5
         with:
@@ -168,6 +186,7 @@ jobs:
           node scripts/parity/compare.mjs || parity_status=1
           node scripts/parity/errors.mjs || parity_status=1
           node scripts/parity/upload.mjs || parity_status=1
+          node scripts/parity/commerce.mjs || parity_status=1
           if [ "$parity_status" != 0 ]; then
             tail -80 "$RUNNER_TEMP/nest-parity.log"
             tail -80 "$RUNNER_TEMP/rust-parity.log"
