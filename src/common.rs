@@ -1,5 +1,5 @@
 use chrono::{DateTime, NaiveDate, NaiveDateTime, SecondsFormat, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, de::Error as _};
 use serde_json::{Value, json};
 
 use crate::error::{AppError, AppResult};
@@ -39,6 +39,41 @@ where
     D: serde::Deserializer<'de>,
 {
     coerce_js_bool(deserializer).map(Some)
+}
+
+// Zod's z.coerce.date() runs JavaScript Date(value): unlike parsing a string,
+// numbers are milliseconds since the Unix epoch and null/boolean are also
+// accepted. Keep the DTO representation as an ISO string for parse_datetime.
+pub fn coerce_js_date<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    let millis = match value {
+        Value::String(text) => return Ok(text),
+        Value::Null => 0,
+        Value::Bool(value) => i64::from(value),
+        Value::Number(number) => {
+            let numeric = number
+                .as_f64()
+                .ok_or_else(|| D::Error::custom("Invalid date"))?;
+            if !numeric.is_finite() || numeric.abs() > 8.64e15 {
+                return Err(D::Error::custom("Invalid date"));
+            }
+            numeric as i64
+        }
+        _ => return Err(D::Error::custom("Invalid date")),
+    };
+    DateTime::<Utc>::from_timestamp_millis(millis)
+        .map(|date| date.to_rfc3339_opts(SecondsFormat::Millis, true))
+        .ok_or_else(|| D::Error::custom("Invalid date"))
+}
+
+pub fn coerce_js_date_optional<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    coerce_js_date(deserializer).map(Some)
 }
 
 #[derive(Deserialize, Default)]

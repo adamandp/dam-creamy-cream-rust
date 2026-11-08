@@ -203,6 +203,9 @@ await compare('discount strips unknown and accepts explicit nulls', '/discounts'
 await compare('discount accepts date-only strings like Zod', '/discounts', 'POST', {
   ...discountCreate, name: 'Cream Date Sale', startDate: '2026-11-08', endDate: '2026-12-08',
 }, statusOnly);
+await compare('discount coerces numeric epoch dates like Zod', '/discounts', 'POST', {
+  ...discountCreate, name: 'Cream Epoch Sale', startDate: Date.parse('2026-11-08T00:00:00.000Z'), endDate: Date.parse('2026-12-08T00:00:00.000Z'),
+});
 await compare('discount PATCH strips unknown keys', `/discounts/${ids.discount}`, 'PATCH', { description: 'Cream discount extra', ignored: 7 });
 await compare('discount after unknown-key PATCH', `/discounts/${ids.discount}`, 'GET', undefined, { ignoreUpdatedAt: true });
 for (const field of ['value', 'description', 'productId', 'quantity']) {
@@ -211,12 +214,16 @@ for (const field of ['value', 'description', 'productId', 'quantity']) {
   await compare(`voucher missing nullable ${field}`, '/vouchers', 'POST', invalid, expectError);
 }
 await compare('voucher strips unknown and accepts explicit nulls', '/vouchers', 'POST', { ...voucherCreate, ignored: 'okay' }, statusOnly);
+await compare('voucher coerces null and boolean dates like Zod', '/vouchers', 'POST', {
+  ...voucherCreate, code: 'CREAM-COERCE', name: 'Cream Voucher Date Coerce', startDate: null, endDate: true,
+});
 await compare('voucher PATCH strips unknown keys', `/vouchers/${ids.voucher}`, 'PATCH', { description: 'Cream voucher extra', ignored: 7 });
 await compare('voucher after unknown-key PATCH', `/vouchers/${ids.voucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('review strips unknown fields', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 4, comment: null, unknown: 'ignored' }, statusOnly);
 await compare('review invalid rating', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 6 }, expectError);
 await compare('product-discount missing discountId', '/product-discounts', 'POST', { productId: ids.product }, expectError);
 await compare('user-voucher strips unknown fields', '/user-vouchers', 'POST', { userId: ids.user, voucherId: ids.voucher, claimedAt: '2026-11-08T00:00:00.000Z', expiredAt: '2026-12-08T00:00:00.000Z', ignored: true }, statusOnly);
+await compare('user-voucher coerces date inputs like Zod', '/user-vouchers', 'POST', { userId: ids.user, voucherId: ids.voucher, claimedAt: null, expiredAt: Date.parse('2026-12-08T00:00:00.000Z') });
 await compare('address coerce boolean string', '/addresses', 'POST', addressCreate, statusOnly);
 await compare('address reject invalid phone', '/addresses', 'POST', { ...addressCreate, recipientPhoneNumber: 'abc' }, expectError);
 await compare('address strict extra fields', '/addresses', 'POST', { ...addressCreate, unexpected: 42 }, expectError);
@@ -244,9 +251,12 @@ async function compareCreatedRows(label, path, selected) {
 }
 await compareCreatedRows('category creates persist identical fields', '/categories?page=1&limit=100', (row) => ['Cream New', 'Cream Nullable'].includes(row.name));
 await compareCreatedRows('discount creates persist identical fields', '/discounts?page=1&limit=100', (row) => ['Cream Sale', 'Cream Date Sale'].includes(row.name));
+await compareCreatedRows('discount numeric date coercion persisted', '/discounts?page=1&limit=100', (row) => row.name === 'Cream Epoch Sale');
 await compareCreatedRows('voucher create persists identical fields', '/vouchers?page=1&limit=100', (row) => row.code === 'CREAM-PARITY');
+await compareCreatedRows('voucher null and boolean date coercion persisted', '/vouchers?page=1&limit=100', (row) => row.code === 'CREAM-COERCE');
 await compareCreatedRows('review create persists identical fields', `/reviews/product/${ids.product}?page=1&limit=100`, (row) => row.comment === null && row.rate === 4);
 await compareCreatedRows('user voucher create persists identical fields', '/user-vouchers?page=1&limit=100', (row) => row.expiredAt === '2026-12-08T00:00:00.000Z');
+await compareCreatedRows('user voucher coerced date persisted', '/user-vouchers?page=1&limit=100', (row) => row.claimedAt === '1970-01-01T00:00:00.000Z');
 await compareCreatedRows('address boolean coercion persists identical fields', '/addresses?page=1&limit=100', (row) => row.recipientName === 'Parity');
 
 async function compareDeleteCreated(label, collection, resourcePath, matching, soft = false) {
@@ -280,7 +290,9 @@ async function compareDeleteCreated(label, collection, resourcePath, matching, s
 }
 await compareDeleteCreated('category hard delete', '/categories?page=1&limit=100', '/categories', (row) => row.name === 'Cream New');
 await compareDeleteCreated('discount hard delete', '/discounts?page=1&limit=100', '/discounts', (row) => row.name === 'Cream Date Sale');
+await compareDeleteCreated('discount numeric date create cleaned', '/discounts?page=1&limit=100', '/discounts', (row) => row.name === 'Cream Epoch Sale');
 await compareDeleteCreated('voucher soft delete', '/vouchers?page=1&limit=100', '/vouchers', (row) => row.code === 'CREAM-PARITY', true);
+await compareDeleteCreated('voucher coerced dates soft delete', '/vouchers?page=1&limit=100', '/vouchers', (row) => row.code === 'CREAM-COERCE', true);
 await compareDeleteCreated('review hard delete', `/reviews/product/${ids.product}?page=1&limit=100`, '/reviews', (row) => row.comment === null && row.rate === 4);
 await compare('product discount soft delete', `/product-discounts/${ids.productDiscount}`, 'DELETE');
 await compare('product discount after soft delete', `/product-discounts/${ids.productDiscount}`, 'GET', undefined, { ignoreUpdatedAt: true });

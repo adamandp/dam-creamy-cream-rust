@@ -35,7 +35,9 @@ use crate::{
 pub struct Create {
     user_id: Uuid,
     voucher_id: Uuid,
+    #[serde(deserialize_with = "crate::common::coerce_js_date")]
     claimed_at: String,
+    #[serde(deserialize_with = "crate::common::coerce_js_date")]
     expired_at: String,
 }
 pub fn routes() -> Router<AppState> {

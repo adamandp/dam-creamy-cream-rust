@@ -38,7 +38,9 @@ pub struct Create {
     product_id: Option<Uuid>,
     #[serde(deserialize_with = "crate::common::required_nullable")]
     quantity: Option<i32>,
+    #[serde(deserialize_with = "crate::common::coerce_js_date")]
     start_date: String,
+    #[serde(deserialize_with = "crate::common::coerce_js_date")]
     end_date: String,
 }
 
@@ -70,7 +72,9 @@ pub struct Update {
         deserialize_with = "serde_with::rust::double_option::deserialize"
     )]
     quantity: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_date_optional")]
     start_date: Option<String>,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_date_optional")]
     end_date: Option<String>,
 }
 

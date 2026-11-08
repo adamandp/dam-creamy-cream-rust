@@ -42,7 +42,9 @@ pub struct Create {
     quantity: Option<i32>,
     minimum_purchase: f64,
     is_active: bool,
+    #[serde(deserialize_with = "crate::common::coerce_js_date")]
     start_date: String,
+    #[serde(deserialize_with = "crate::common::coerce_js_date")]
     end_date: String,
     max_redeemed: i32,
     redeemed_count: i32,
@@ -76,7 +78,9 @@ pub struct Update {
     quantity: Option<Option<i32>>,
     minimum_purchase: Option<f64>,
     is_active: Option<bool>,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_date_optional")]
     start_date: Option<String>,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_date_optional")]
     end_date: Option<String>,
     max_redeemed: Option<i32>,
     redeemed_count: Option<i32>,
