@@ -65,13 +65,16 @@ not considered equivalent unless called out below.
   runs independent Redis databases, and compares real HTTP statuses, response
   JSON, PATCH responses and persisted updates using
   `scripts/parity/compare.mjs`. Any unexpected mismatch fails CI.
-- The differential matrix covers 27 PR1/PR2 GET scenarios and five additional
-  PATCH/readback cases. It intentionally excludes legacy broken controller
+- The differential matrix covers 28 PR1/PR2 GET scenarios and 16 additional
+  PATCH/readback and cache-staleness cases. It intentionally excludes legacy broken controller
   decorators, different authorization rules, and the agreed upload change.
 - CI also boots an isolated MinIO instance and executes the storage integration
   test with a **real presigned HTTP PUT**, verify, immutable copy, GET and
   cleanup; it fails if `TEST_MINIO_ENDPOINT` is unavailable.
+- After differential checks, `scripts/parity/upload.mjs` exercises the full
+  authenticated Rust API flow: presign, browser-style PUT into MinIO, confirm,
+  public media GET and idempotent confirm retry.
 - Running both test sets requires PostgreSQL, Redis, MinIO, Node.js, and Rust.
-  Differential testing of the entire route/DTO edge-case matrix, cache
-  staleness and browser-specific CORS conditions is still **not complete**;
+  Differential testing of the entire route/DTO edge-case matrix and
+  browser-specific CORS conditions is still **not complete**;
   the current matrix is a reproducible parity gate, not 100% certification.

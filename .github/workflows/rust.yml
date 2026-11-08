@@ -85,6 +85,18 @@ jobs:
           npm ci --no-audit --no-fund
           npx prisma generate
           npm run build
+          # This Nest app emits dist/src/main.js when prisma.config.ts is
+          # included in TypeScript's root; resolve either layout explicitly.
+          nest_entry="$RUNNER_TEMP/nest-reference/dist/src/main.js"
+          if [ ! -f "$nest_entry" ]; then
+            nest_entry="$RUNNER_TEMP/nest-reference/dist/main.js"
+          fi
+          test -f "$nest_entry"
+          # Legacy absolute `src/...` imports need a runtime module alias.
+          compiled_src="$(dirname "$nest_entry")"
+          if [ ! -e "$RUNNER_TEMP/nest-reference/node_modules/src" ]; then
+            ln -s "$compiled_src" "$RUNNER_TEMP/nest-reference/node_modules/src"
+          fi
           cd "$GITHUB_WORKSPACE"
           cargo build --locked
       - name: Seed two isolated, identically migrated databases
@@ -107,9 +119,13 @@ jobs:
           REFRESH_JWT_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           COOKIE_SECRET_KEY: parity-cookie-not-production
         run: |
+          nest_entry="$RUNNER_TEMP/nest-reference/dist/src/main.js"
+          if [ ! -f "$nest_entry" ]; then
+            nest_entry="$RUNNER_TEMP/nest-reference/dist/main.js"
+          fi
           DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_nest \
           REDIS_URL=redis://127.0.0.1:6379/0 PORT=3101 \
-            node "$RUNNER_TEMP/nest-reference/dist/main.js" \
+            node "$nest_entry" \
             > "$RUNNER_TEMP/nest-parity.log" 2>&1 &
           DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_rust \
           REDIS_URL=redis://127.0.0.1:6379/1 PORT=3102 \
@@ -134,7 +150,10 @@ jobs:
             tail -100 "$RUNNER_TEMP/rust-parity.log"
             exit 1
           fi
-          if ! node scripts/parity/compare.mjs; then
+          parity_status=0
+          node scripts/parity/compare.mjs || parity_status=1
+          node scripts/parity/upload.mjs || parity_status=1
+          if [ "$parity_status" != 0 ]; then
             tail -80 "$RUNNER_TEMP/nest-parity.log"
             tail -80 "$RUNNER_TEMP/rust-parity.log"
             exit 1

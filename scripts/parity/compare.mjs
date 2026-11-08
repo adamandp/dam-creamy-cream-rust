@@ -48,6 +48,7 @@ const cases = [
   ['products list', '/products/?page=1&limit=10'],
   ['products catalog', '/products/catalog?page=1&limit=10'],
   ['product detail', `/product/${ids.product}`],
+  ['product formatted information', `/product/information/${ids.product}`],
   ['inventory list', '/inventory/?page=1&limit=10'],
   ['inventory detail', `/inventory/${ids.inventory}`],
   ['inventory by product', `/inventory/product/${ids.product}`],
@@ -130,8 +131,19 @@ await compare('inventory quantity update', `/inventory/${ids.inventory}`, 'PATCH
 await compare('inventory updated detail', `/inventory/${ids.inventory}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('category description update', `/categories/${ids.category}`, 'PATCH', { description: 'Updated cream category' });
 await compare('category updated detail', `/categories/${ids.category}`, 'GET', undefined, { ignoreUpdatedAt: true });
+await compare('category list stays cached after update', '/categories/?page=1&limit=10');
 // Both backends reject unchanged PATCH values; error payload envelopes differ.
 await compare('category unchanged PATCH', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Cake' }, { statusOnly: true, expectError: true });
+await compare('product description update', `/products/${ids.product}`, 'PATCH', { description: 'Creamy vanilla updated' });
+await compare('product detail after update', `/product/${ids.product}`);
+await compare('review comment update', `/reviews/${ids.review}`, 'PATCH', { comment: 'Loved it' });
+await compare('review detail after update', `/reviews/${ids.review}`, 'GET', undefined, { ignoreUpdatedAt: true });
+await compare('discount name update', `/discounts/${ids.discount}`, 'PATCH', { name: 'Cream Discount Updated' });
+await compare('discount detail after update', `/discounts/${ids.discount}`, 'GET', undefined, { ignoreUpdatedAt: true });
+await compare('voucher name update', `/vouchers/${ids.voucher}`, 'PATCH', { name: 'Cream Voucher Updated' });
+await compare('voucher detail after update', `/vouchers/${ids.voucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
+await compare('user voucher mark used', `/user-vouchers/${ids.userVoucher}`, 'PATCH', {});
+await compare('user voucher after used', `/user-vouchers/${ids.userVoucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
 
-console.log(`\nNestJS ↔ Axum differential: ${passed} matched, ${failed} mismatched, ${cases.length + 5} scenarios.`);
+console.log(`\nNestJS ↔ Axum differential: ${passed} matched, ${failed} mismatched, ${cases.length + 16} scenarios.`);
 if (failed) process.exitCode = 1;
