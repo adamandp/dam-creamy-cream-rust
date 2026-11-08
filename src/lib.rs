@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         )
     };
     Router::new()
+        .nest("/health", features::health::routes())
         .nest("/auth", features::auth::routes())
         .route("/sessions/refresh", post(features::session::refresh))
         .nest("/roles", features::roles::routes())

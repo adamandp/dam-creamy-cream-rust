@@ -15,6 +15,7 @@ const unsigned = `${enc('{"alg":"HS256","typ":"JWT"}')}.${payload}`;
 const token = `${unsigned}.${createHmac('sha256',secret).update(unsigned).digest('base64url')}`;
 const absent = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const cases = [
+  ['health external ping', '/health'],
   ['health database ping', '/health/db'],
   ['review list legacy decorators', '/reviews?page=1&limit=10'],
   ['review by me legacy decorators', '/reviews/me?page=1&limit=10'],
@@ -53,6 +54,7 @@ const cases = [
 // Report these historical issues independently rather than mask mismatches in
 // the stable 400/404 API contract with status-only assertions.
 const legacyExceptions = new Set([
+  'health external ping',
   'health database ping',
   'review list legacy decorators',
   'review by me legacy decorators',

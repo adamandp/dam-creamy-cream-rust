@@ -4,6 +4,7 @@ pub mod authorization;
 pub mod catalog_common;
 pub mod categories;
 pub mod discounts;
+pub mod health;
 pub mod inventory;
 pub mod product;
 pub mod product_discounts;
