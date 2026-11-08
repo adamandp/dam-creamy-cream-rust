@@ -55,9 +55,7 @@ where
 // Preserve that shape for the common query DTOs and required create fields.
 fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     let class_name = std::any::type_name::<T>();
-    if !(class_name.ends_with("categories::Create")
-        || class_name.ends_with("products::Create"))
-    {
+    if !(class_name.ends_with("categories::Create") || class_name.ends_with("products::Create")) {
         return None;
     }
     let field = message.split("missing field `").nth(1)?.split('`').next()?;
@@ -68,8 +66,12 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
         _ => return None,
     };
     let message = match expected {
-        "string" => format!("📜 {display} must be a valid text. No weird symbols! 🚫 {{Invalid String}}"),
-        _ => format!("⚖️ {display} must be either true or false. No Schrödinger values! 🐱 {{Invalid Boolean}}"),
+        "string" => {
+            format!("📜 {display} must be a valid text. No weird symbols! 🚫 {{Invalid String}}")
+        }
+        _ => format!(
+            "⚖️ {display} must be either true or false. No Schrödinger values! 🐱 {{Invalid Boolean}}"
+        ),
     };
     Some(AppError::Validation(vec![json!({
         "expected":expected,"code":"invalid_type","path":[field],"message":message
@@ -87,7 +89,13 @@ fn legacy_query_validation<T>(raw: &str) -> Option<Vec<Value>> {
         .filter(|part| !part.is_empty())
         .map(|part| part.split_once('=').unwrap_or((part, "")))
         .collect();
-    let value = |field: &str| params.iter().rev().find(|(k, _)| *k == field).map(|(_, v)| *v);
+    let value = |field: &str| {
+        params
+            .iter()
+            .rev()
+            .find(|(k, _)| *k == field)
+            .map(|(_, v)| *v)
+    };
     let mut errors = Vec::new();
 
     if catalog {
@@ -113,23 +121,55 @@ fn legacy_query_validation<T>(raw: &str) -> Option<Vec<Value>> {
         validate_query_number(&mut errors, field, value(field), 1.0, 100.0);
     }
     if catalog {
-        let unknown: Vec<&str> = params.iter().map(|(key, _)| *key).filter(|key| !matches!(*key, "q"|"sort"|"cat"|"min"|"max"|"page"|"limit")).collect();
+        let unknown: Vec<&str> = params
+            .iter()
+            .map(|(key, _)| *key)
+            .filter(|key| {
+                !matches!(
+                    *key,
+                    "q" | "sort" | "cat" | "min" | "max" | "page" | "limit"
+                )
+            })
+            .collect();
         if !unknown.is_empty() {
             let message = if unknown.len() == 1 {
                 format!("Unrecognized key: \"{}\"", unknown[0])
             } else {
-                format!("Unrecognized keys: {}", unknown.iter().map(|key| format!("\"{key}\"")).collect::<Vec<_>>().join(", "))
+                format!(
+                    "Unrecognized keys: {}",
+                    unknown
+                        .iter()
+                        .map(|key| format!("\"{key}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             };
-            errors.push(json!({"code":"unrecognized_keys","keys":unknown,"path":[],"message":message}));
+            errors.push(
+                json!({"code":"unrecognized_keys","keys":unknown,"path":[],"message":message}),
+            );
         }
     }
     (!errors.is_empty()).then_some(errors)
 }
 
-fn validate_query_number(errors: &mut Vec<Value>, field: &str, raw: Option<&str>, min: f64, max: f64) {
+fn validate_query_number(
+    errors: &mut Vec<Value>,
+    field: &str,
+    raw: Option<&str>,
+    min: f64,
+    max: f64,
+) {
     let Some(raw) = raw else { return };
-    let display = match field { "page" => "Page", "limit" => "Limit", _ => field };
-    let number = if raw.is_empty() { Some(0.0) } else { raw.parse::<f64>().ok() };
+    let display = match field {
+        "page" => "Page",
+        "limit" => "Limit",
+        _ => field,
+    };
+    let number = if raw.is_empty() {
+        Some(0.0)
+    } else {
+        raw.parse::<f64>().ok()
+    };
     let Some(number) = number.filter(|v| v.is_finite()) else {
         errors.push(json!({"expected":"number","code":"invalid_type","received":"NaN","path":[field],"message":format!("🔢 {display} must be a valid number. No funky math here! 🚫 {{Invalid Number}}") }));
         return;
