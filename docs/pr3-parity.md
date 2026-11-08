@@ -37,7 +37,7 @@ Reference: `adamandp/dam-creamy-cream-be@7a3407b` (NestJS). Base: Rust PR2 `feat
 - Rust integration test runs on isolated `creamy_cream_test` schema, exercising a late-stage transaction rollback followed by success, plus two competing checkouts on independent PostgreSQL connections where only one may reserve the remaining stock.
 - The checkout integration fixture also exercises a legitimate **cookie-only cart request**, forged cookie rejection, and revoked-session rejection against the actual `user_tokens` table.
 - Unit tests verify input schema, quantity math and voucher math.
-- HTTP differential script compares cart, shipping (including anonymous status update), payments and absent orders routes against pinned NestJS on two separately migrated PostgreSQL databases.
+- HTTP differential script compares cart, shipping (including anonymous status update and a complete success/failure RajaOngkir HTTP roundtrip to an isolated provider mock), payments and absent orders routes against pinned NestJS on two separately migrated PostgreSQL databases.
 - `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --all-targets --locked` run in CI.
 
 No legacy image/object migration and no data migrations; MinIO remains the presigned direct-upload storage from PR1/PR2.

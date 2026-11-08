@@ -67,7 +67,7 @@ await compare('shipments status update','PATCH',`/shipments/${id.shipment}/statu
 await compare('shipments anonymous status update','PATCH',`/shipments/${id.shipment}/status`,{status:'DELIVERED'},false,false);
 await compare('shipments invalid status','PATCH',`/shipments/${id.shipment}/status`,{status:'PACKING'});
 await compare('shipments updated detail','GET',`/shipments/${id.shipment}`,undefined,true);
-await compare('RajaOngkir unavailable upstream','POST','/shipments/cost',{origin:1,destination:2,weight:1000});
+await compare('RajaOngkir successful upstream quote','POST','/shipments/cost',{origin:1,destination:2,weight:1000});
 await compare('RajaOngkir rejects unknown field','POST','/shipments/cost',
   {origin:1,destination:2,weight:1000,unrecognized:true});
 await compare('RajaOngkir missing origin','POST','/shipments/cost',{destination:2,weight:1000});
