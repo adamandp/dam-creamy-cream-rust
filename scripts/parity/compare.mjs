@@ -151,7 +151,7 @@ await compare('inventory updated detail', `/inventory/${ids.inventory}`, 'GET', 
 await compare('category description update', `/categories/${ids.category}`, 'PATCH', { description: 'Updated cream category' });
 await compare('category updated detail', `/categories/${ids.category}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('category list stays cached after update', '/categories?page=1&limit=10');
-// Both backends reject unchanged PATCH values; error payload envelopes differ.
+// Both backends reject unchanged PATCH values with the same error envelope.
 await compare('category unchanged PATCH', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Cake' }, { expectError: true });
 await compare('product description update', `/products/${ids.product}`, 'PATCH', { description: 'Creamy vanilla updated' });
 await compare('product detail after update', `/product/${ids.product}`);

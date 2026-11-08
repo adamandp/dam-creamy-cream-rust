@@ -13,7 +13,9 @@ INSERT INTO category (id, name, description, is_active, created_at, updated_at) 
 ('44444444-4444-4444-8444-444444444444', 'Cream Cake', 'Dairy cakes', true, '2026-01-01', '2026-01-01');
 
 INSERT INTO products (id, category_id, name, image_url, description, price, is_active, created_at, updated_at) VALUES
-('55555555-5555-4555-8555-555555555555', '44444444-4444-4444-8444-444444444444', 'Vanilla Cream', NULL, 'Creamy vanilla', 15000, true, '2026-01-01', '2026-01-01');
+('55555555-5555-4555-8555-555555555555', '44444444-4444-4444-8444-444444444444', 'Vanilla Cream', NULL, 'Creamy vanilla', 15000, true, '2026-01-01', '2026-01-01'),
+-- Existing product without product_information makes the 404 deterministic.
+('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '44444444-4444-4444-8444-444444444444', 'Unlisted Cream', NULL, 'No optional information yet', 15000, false, '2026-01-01', '2026-01-01');
 
 INSERT INTO product_information (id, product_id, highlights, serving_suggestions, product_details, why_choose, created_at, updated_at) VALUES
 ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', '55555555-5555-4555-8555-555555555555', '["Fresh"]', '["Chill"]', '{"size":"1 L","storage":"Freezer","shelfLife":"One year"}', 'Because it is creamy', '2026-01-01', '2026-01-01');

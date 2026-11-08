@@ -74,7 +74,7 @@ async fn information(State(s): State<AppState>, Path(id): Path<String>) -> AppRe
         .one(&s.db)
         .await
         .map_err(AppError::db)?
-        .ok_or_else(|| not_found("Product"))?;
+        .ok_or_else(|| not_found("Product Information"))?;
     let p = product::Entity::find_by_id(id)
         .one(&s.db)
         .await

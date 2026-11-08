@@ -64,6 +64,11 @@ not considered equivalent unless called out below.
 7. The Nest `/health` route uses an actual HTTP GET to `google.com`. Rust
    checks TCP reachability to the same host, returning the corresponding
    Terminus-compatible response shape; HTTP-specific failures can differ.
+8. Nest `/product/information/:id` performs two `findUniqueOrThrow` queries
+   concurrently. If both the product and its information are absent, the
+   model name in the 404 varies with whichever query rejects first. The HTTP
+   error regression fixture instead requests an existing product without
+   `product_information`, for a stable exact-body assertion.
 
 ## Verification / limits
 

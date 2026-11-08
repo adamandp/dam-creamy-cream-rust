@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Temporary diagnostic characterization: collect exact Nest/Axum failure
-// envelopes before converting them into durable error-contract assertions.
+// Assert exact Nest/Axum error envelopes with deterministic test fixtures.
 import { createHmac } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -26,7 +25,7 @@ const cases = [
   ['address detail absent', `/addresses/${absent}`],
   ['category detail absent', `/categories/${absent}`],
   ['product detail absent', `/product/${absent}`],
-  ['product information absent', `/product/information/${absent}`],
+  ['product information absent for existing product', '/product/information/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'],
   ['inventory detail absent', `/inventory/${absent}`],
   ['inventory by product absent', `/inventory/product/${absent}`],
   ['review detail absent', `/reviews/${absent}`],
