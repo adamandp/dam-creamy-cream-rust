@@ -14,12 +14,26 @@ pub fn routes() -> Router<AppState> {
 }
 
 fn js_number(s: &str) -> String {
-    if s.trim().is_empty() {
+    let text = s.trim();
+    if text.is_empty() {
         return "0".into();
     }
-    match s.parse::<f64>() {
-        Ok(n) if n.is_finite() => n.to_string(),
-        _ => "NaN".into(),
+    let radix = [("0x", 16), ("0X", 16), ("0b", 2), ("0B", 2), ("0o", 8), ("0O", 8)];
+    for (prefix, base) in radix {
+        if let Some(digits) = text.strip_prefix(prefix) {
+            return u64::from_str_radix(digits, base)
+                .map_or_else(|_| "NaN".into(), |n| (n as f64).to_string());
+        }
+    }
+    match text.parse::<f64>() {
+        Ok(n) if n.is_nan() => "NaN".into(),
+        Ok(n) if n.is_infinite() => {
+            let sign = if n.is_sign_negative() { "-" } else { "" };
+            format!("{sign}Infinity")
+        }
+        Ok(n) if n == 0.0 => "0".into(),
+        Ok(n) => n.to_string(),
+        Err(_) => "NaN".into(),
     }
 }
 
@@ -39,5 +53,9 @@ mod tests {
     fn generated_controller_uses_js_numeric_coercion() {
         assert_eq!(super::js_number("5"), "5");
         assert_eq!(super::js_number("missing"), "NaN");
+        assert_eq!(super::js_number("0x10"), "16");
+        assert_eq!(super::js_number("0b101"), "5");
+        assert_eq!(super::js_number("Infinity"), "Infinity");
+        assert_eq!(super::js_number("-0"), "0");
     }
 }

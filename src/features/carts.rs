@@ -39,13 +39,21 @@ pub fn routes() -> Router<AppState> {
 }
 
 fn validate_quantity(quantity: i32) -> AppResult<()> {
-    if (1..=100).contains(&quantity) {
-        Ok(())
-    } else {
-        Err(AppError::BadRequest(
-            "Quantity must be between 1 and 100".into(),
-        ))
+    if quantity < 1 {
+        return Err(AppError::Validation(vec![json!({
+            "origin":"number","code":"too_small","minimum":1,"inclusive":true,
+            "path":["quantity"],
+            "message":"🔡 Quantity must be at least 1 characters. Keep going! 💪 {Minimum Length}"
+        })]));
     }
+    if quantity > 100 {
+        return Err(AppError::Validation(vec![json!({
+            "origin":"number","code":"too_big","maximum":100,"inclusive":true,
+            "path":["quantity"],
+            "message":"🚀 Whoa! Quantity is too long. Maximum allowed is 100 characters! ✍️ {Maximum Length}"
+        })]));
+    }
+    Ok(())
 }
 
 async fn add(

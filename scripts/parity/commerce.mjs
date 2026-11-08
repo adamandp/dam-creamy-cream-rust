@@ -57,15 +57,25 @@ await compare('cart remove','POST','/carts/user/remove',{productId:id.product,qu
 await compare('cart decrement readback','GET','/carts/user?page=1&limit=10');
 await compare('cart missing product','POST','/carts/user/add',
   {productId:'aaaaaaaa-1111-4111-8111-111111111111',quantity:1});
+await compare('cart quantity below minimum','POST','/carts/user/add',{productId:id.product,quantity:0});
+await compare('cart quantity above maximum','POST','/carts/user/remove',{productId:id.product,quantity:101});
+await compare('cart missing quantity','POST','/carts/user/add',{productId:id.product});
+await compare('cart missing product ID','POST','/carts/user/add',{quantity:1});
 await compare('shipments list','GET','/shipments?page=1&limit=10');
 await compare('shipments detail','GET',`/shipments/${id.shipment}`);
 await compare('shipments status update','PATCH',`/shipments/${id.shipment}/status`,{status:'SHIPPED'});
 await compare('shipments anonymous status update','PATCH',`/shipments/${id.shipment}/status`,{status:'DELIVERED'},false,false);
+await compare('shipments invalid status','PATCH',`/shipments/${id.shipment}/status`,{status:'PACKING'});
 await compare('shipments updated detail','GET',`/shipments/${id.shipment}`,undefined,true);
 await compare('RajaOngkir unavailable upstream','POST','/shipments/cost',{origin:1,destination:2,weight:1000});
+await compare('RajaOngkir rejects unknown field','POST','/shipments/cost',
+  {origin:1,destination:2,weight:1000,unrecognized:true});
+await compare('RajaOngkir missing origin','POST','/shipments/cost',{destination:2,weight:1000});
 for (const [label,method,path,body] of [
   ['payments scaffold list','GET','/payments'],
   ['payments scaffold detail','GET','/payments/123'],
+  ['payments JS hexadecimal number','GET','/payments/0x10'],
+  ['payments JS infinity number','GET','/payments/Infinity'],
   ['payments scaffold create','POST','/payments',{}],
   ['payments scaffold update','PATCH','/payments/123',{}],
   ['payments scaffold delete','DELETE','/payments/123'],

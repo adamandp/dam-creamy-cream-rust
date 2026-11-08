@@ -59,17 +59,23 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     let is_voucher = class_name.ends_with("::vouchers::Create");
     let is_product = class_name.ends_with("::products::Create");
     let is_address = class_name.ends_with("::addresses::CreateAddressBody");
+    let is_cart = class_name.ends_with("::carts::CartInput");
+    let is_shipping_cost = class_name.ends_with("::shipments::CostInput");
+    let is_shipment_status = class_name.ends_with("::shipments::UpdateStatus");
     if !(is_category
         || is_discount
         || is_voucher
         || is_product
+        || is_cart
+        || is_shipping_cost
+        || is_shipment_status
         || class_name.ends_with("reviews::Create")
         || class_name.ends_with("product_discounts::Create")
         || is_address)
     {
         return None;
     }
-    if (is_product || is_address)
+    if (is_product || is_address || is_shipping_cost)
         && let Some(field) = message
             .split("unknown field `")
             .nth(1)
@@ -80,6 +86,15 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
             "message":format!("Unrecognized key: \"{field}\"")
         })]));
     }
+    if is_shipment_status
+        && (message.contains("unknown variant") || message.contains("missing field `status`"))
+    {
+        return Some(AppError::Validation(vec![json!({
+            "code":"invalid_value","values":["PENDING","SHIPPED","DELIVERED","CANCELLED"],
+            "path":["status"],
+            "message":"🎭 Status must be one of the following enum. Choose wisely! 🎯 {Invalid Enum}"
+        })]));
+    }
     if message.contains("isActive: invalid type:") && message.contains("expected a boolean") {
         return Some(AppError::Validation(vec![json!({
             "expected":"boolean","code":"invalid_type","path":["isActive"],
@@ -87,6 +102,13 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
         })]));
     }
     let field = message.split("missing field `").nth(1)?.split('`').next()?;
+    if is_shipping_cost && matches!(field, "origin" | "destination" | "weight") {
+        return Some(AppError::Validation(vec![json!({
+            "expected":"number","code":"invalid_type","received":"NaN",
+            "path":[field],
+            "message":format!("🔢 {field} must be a valid number. No funky math here! 🚫 {{Invalid Number}}")
+        })]));
+    }
     let (expected, display) = match field {
         "name" if is_category => ("string", "Category Name"),
         "name" if is_discount => ("string", "Discount Name"),
