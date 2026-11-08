@@ -2,6 +2,7 @@
 // Temporary diagnostic characterization: collect exact Nest/Axum failure
 // envelopes before converting them into durable error-contract assertions.
 import { createHmac } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 const nestBase = process.env.PARITY_NEST_URL ?? 'http://127.0.0.1:3101';
 const rustBase = process.env.PARITY_RUST_URL ?? 'http://127.0.0.1:3102';
@@ -46,6 +47,20 @@ const cases = [
   ['inventory empty PATCH', '/inventory/66666666-6666-4666-8666-666666666666', 'PATCH', {}],
 ];
 
+// Legacy Nest controllers have no UUID pipe on some routes, invalid requests
+// bubble up a Prisma 500 whose stack includes CI-specific absolute paths.
+// The reviews controller also omits the decorators on two handler parameters.
+// Report these historical issues independently rather than mask mismatches in
+// the stable 400/404 API contract with status-only assertions.
+const legacyExceptions = new Set([
+  'health database ping',
+  'review list legacy decorators',
+  'review by me legacy decorators',
+  'user voucher by user route order',
+  'category bad UUID',
+  'inventory bad UUID',
+]);
+
 async function invoke(base, path, method = 'GET', body) {
   const response = await fetch(new URL(path, base), {
     method,
@@ -59,7 +74,22 @@ async function invoke(base, path, method = 'GET', body) {
   return {status:response.status,data};
 }
 
+let passed = 0;
+let failed = 0;
+let legacy = 0;
 for (const [label,path,method,body] of cases) {
   const [nest,rust] = await Promise.all([invoke(nestBase,path,method,body),invoke(rustBase,path,method,body)]);
-  console.log('ERROR_SURVEY '+JSON.stringify({label,nest,rust}));
+  const same = nest.status === rust.status && isDeepStrictEqual(nest.data,rust.data);
+  if (legacyExceptions.has(label)) {
+    console.log('LEGACY_DIFFERENCE '+JSON.stringify({label,nest,rust}));
+    legacy++;
+  } else if (same) {
+    console.log(`PASS error contract: ${label} (${nest.status})`);
+    passed++;
+  } else {
+    console.error('FAIL error contract '+JSON.stringify({label,nest,rust}));
+    failed++;
+  }
 }
+console.log(`Error response parity: ${passed} matched, ${failed} mismatched, ${legacy} legacy exceptions`);
+if (failed) process.exitCode = 1;

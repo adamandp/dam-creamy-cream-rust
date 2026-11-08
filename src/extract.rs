@@ -24,8 +24,7 @@ where
             .map(|Json(value)| Self(value))
             .map_err(|err| {
                 let message = err.body_text();
-                legacy_json_validation::<T>(&message)
-                    .unwrap_or_else(|| AppError::BadRequest(message))
+                legacy_json_validation::<T>(&message).unwrap_or(AppError::BadRequest(message))
             })
     }
 }
