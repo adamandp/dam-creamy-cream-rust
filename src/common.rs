@@ -136,7 +136,9 @@ pub fn parse_uuid(value: &str) -> AppResult<uuid::Uuid> {
 // or with even one supplied field identical to its persisted value is a 400.
 // An entry of None means the field was omitted; Some(true) means unchanged.
 pub fn require_changed_update(fields: &[(&str, Option<bool>)]) -> AppResult<()> {
-    if fields.iter().all(|(_, same)| same.is_none()) {
+    if fields.iter().all(|(_, same)| same.is_none())
+        || fields.iter().all(|(_, same)| *same != Some(false))
+    {
         return Err(AppError::BadRequest(
             "📭 No changes detected. Everything is already up to date! 👍".into(),
         ));
@@ -173,11 +175,18 @@ mod update_tests {
     #[test]
     fn patch_requires_a_changed_field_and_rejects_mixed_unchanged_values() {
         assert!(require_changed_update(&[]).is_err());
-        assert!(require_changed_update(&[("city", Some(true))]).is_err());
+        let unchanged = require_changed_update(&[("city", Some(true))]).unwrap_err();
+        assert_eq!(
+            unchanged.to_string(),
+            "📭 No changes detected. Everything is already up to date! 👍"
+        );
         assert!(require_changed_update(&[("city", None)]).is_err());
         assert!(require_changed_update(&[("city", Some(false))]).is_ok());
-        assert!(
-            require_changed_update(&[("city", Some(false)), ("province", Some(true))]).is_err()
+        let mixed =
+            require_changed_update(&[("city", Some(false)), ("province", Some(true))]).unwrap_err();
+        assert_eq!(
+            mixed.to_string(),
+            "📭 No changes detected in province fields. Everything’s already up to date!"
         );
     }
 }

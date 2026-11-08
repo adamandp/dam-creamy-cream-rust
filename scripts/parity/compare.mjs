@@ -106,7 +106,7 @@ async function compare(label, path, method = 'GET', body, options = {}) {
     invoke(rustBase, path, method, body),
   ]);
   const statusMatches = nest.status === rust.status;
-  const bodyMatches = options.statusOnly || isDeepStrictEqual(
+  const bodyMatches = isDeepStrictEqual(
     comparable(nest.data, options.ignoreUpdatedAt),
     comparable(rust.data, options.ignoreUpdatedAt),
   );
@@ -167,7 +167,6 @@ await compare('user voucher after used', `/user-vouchers/${ids.userVoucher}`, 'G
 // Phase 2: compare complete NestJS/Zod responses including validation issues.
 // Generated IDs/timestamps are checked through normalized DB readbacks below.
 const expectError = { expectError: true };
-const statusOnly = {};
 await compare('products catalog unknown search', '/products/catalog?q=nomatch123', 'GET', undefined, expectError);
 await compare('catalog strict query rejects unknown keys', '/products/catalog?unexpected=x', 'GET', undefined, expectError);
 const discountCreate = {
@@ -189,8 +188,8 @@ const addressCreate = {
   village: 'Lengkong', postalCode: '15310', address: 'Cream Street', isPrimary: 'false',
 };
 await compare('category missing required nullable description', '/categories', 'POST', { name: 'Cream Category', isActive: true }, expectError);
-await compare('category unknown field stripped', '/categories', 'POST', { name: 'Cream New', description: null, isActive: true, discardedField: 123 }, statusOnly);
-await compare('category description null allowed', '/categories', 'POST', { name: 'Cream Nullable', description: null, isActive: false }, statusOnly);
+await compare('category unknown field stripped', '/categories', 'POST', { name: 'Cream New', description: null, isActive: true, discardedField: 123 });
+await compare('category description null allowed', '/categories', 'POST', { name: 'Cream Nullable', description: null, isActive: false });
 await compare('category PATCH strips unknown keys', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Catalogue', ignored: 123 });
 await compare('category detail after unknown-key PATCH', `/categories/${ids.category}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('product missing required nullable description', '/products', 'POST', { categoryId: ids.category, name: 'Cream Product', price: 12000, isActive: true }, expectError);
@@ -200,10 +199,10 @@ for (const field of ['value', 'description', 'productId', 'quantity']) {
   delete invalid[field];
   await compare(`discount missing nullable ${field}`, '/discounts', 'POST', invalid, expectError);
 }
-await compare('discount strips unknown and accepts explicit nulls', '/discounts', 'POST', { ...discountCreate, ignored: 'okay' }, statusOnly);
+await compare('discount strips unknown and accepts explicit nulls', '/discounts', 'POST', { ...discountCreate, ignored: 'okay' });
 await compare('discount accepts date-only strings like Zod', '/discounts', 'POST', {
   ...discountCreate, name: 'Cream Date Sale', startDate: '2026-11-08', endDate: '2026-12-08',
-}, statusOnly);
+});
 await compare('discount coerces numeric epoch dates like Zod', '/discounts', 'POST', {
   ...discountCreate, name: 'Cream Epoch Sale', startDate: Date.parse('2026-11-08T00:00:00.000Z'), endDate: Date.parse('2026-12-08T00:00:00.000Z'),
 });
@@ -214,18 +213,18 @@ for (const field of ['value', 'description', 'productId', 'quantity']) {
   delete invalid[field];
   await compare(`voucher missing nullable ${field}`, '/vouchers', 'POST', invalid, expectError);
 }
-await compare('voucher strips unknown and accepts explicit nulls', '/vouchers', 'POST', { ...voucherCreate, ignored: 'okay' }, statusOnly);
+await compare('voucher strips unknown and accepts explicit nulls', '/vouchers', 'POST', { ...voucherCreate, ignored: 'okay' });
 await compare('voucher coerces null and boolean dates like Zod', '/vouchers', 'POST', {
   ...voucherCreate, code: 'CREAM-COERCE', name: 'Cream Voucher Date Coerce', startDate: null, endDate: true,
 });
 await compare('voucher PATCH strips unknown keys', `/vouchers/${ids.voucher}`, 'PATCH', { description: 'Cream voucher extra', ignored: 7 });
 await compare('voucher after unknown-key PATCH', `/vouchers/${ids.voucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
-await compare('review strips unknown fields', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 4, comment: null, unknown: 'ignored' }, statusOnly);
+await compare('review strips unknown fields', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 4, comment: null, unknown: 'ignored' });
 await compare('review invalid rating', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 6 }, expectError);
 await compare('product-discount missing discountId', '/product-discounts', 'POST', { productId: ids.product }, expectError);
-await compare('user-voucher strips unknown fields', '/user-vouchers', 'POST', { userId: ids.user, voucherId: ids.voucher, claimedAt: '2026-11-08T00:00:00.000Z', expiredAt: '2026-12-08T00:00:00.000Z', ignored: true }, statusOnly);
+await compare('user-voucher strips unknown fields', '/user-vouchers', 'POST', { userId: ids.user, voucherId: ids.voucher, claimedAt: '2026-11-08T00:00:00.000Z', expiredAt: '2026-12-08T00:00:00.000Z', ignored: true });
 await compare('user-voucher coerces date inputs like Zod', '/user-vouchers', 'POST', { userId: ids.user, voucherId: ids.voucher, claimedAt: null, expiredAt: Date.parse('2026-12-08T00:00:00.000Z') });
-await compare('address coerce boolean string', '/addresses', 'POST', addressCreate, statusOnly);
+await compare('address coerce boolean string', '/addresses', 'POST', addressCreate);
 await compare('address reject invalid phone', '/addresses', 'POST', { ...addressCreate, recipientPhoneNumber: 'abc' }, expectError);
 await compare('address strict extra fields', '/addresses', 'POST', { ...addressCreate, unexpected: 42 }, expectError);
 await compare('user fullName accepts punctuation', `/users/${ids.user}`, 'PATCH', { fullName: 'Parity Admin, Jr.' });
