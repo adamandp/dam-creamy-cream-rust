@@ -140,7 +140,11 @@ fn decode_query_component(input: &str) -> String {
             index += 3;
             continue;
         }
-        decoded.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        decoded.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
         index += 1;
     }
     String::from_utf8_lossy(&decoded).into_owned()
