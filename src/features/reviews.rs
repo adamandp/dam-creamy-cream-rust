@@ -149,7 +149,10 @@ async fn by_me(
     let (page, limit) = q.checked()?;
     let query = review::Entity::find().filter(review::Column::UserId.eq(actor.id));
     // Legacy service paginates this user's reviews but counts ALL reviews.
-    let total = review::Entity::find().count(&s.db).await.map_err(AppError::db)?;
+    let total = review::Entity::find()
+        .count(&s.db)
+        .await
+        .map_err(AppError::db)?;
     if total == 0 {
         return Err(not_found("Review"));
     }
@@ -184,7 +187,10 @@ async fn by_product(
     let (page, limit) = q.checked()?;
     let query = review::Entity::find().filter(review::Column::ProductId.eq(id));
     // Legacy service paginates this product's reviews but counts ALL reviews.
-    let total = review::Entity::find().count(&s.db).await.map_err(AppError::db)?;
+    let total = review::Entity::find()
+        .count(&s.db)
+        .await
+        .map_err(AppError::db)?;
     if total == 0 {
         return Err(not_found("Review"));
     }

@@ -14,7 +14,9 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
-    entity::{inventory, order_item, product, product_information, review, role, user, user_voucher},
+    entity::{
+        inventory, order_item, product, product_information, review, role, user, user_voucher,
+    },
     features::session,
     infrastructure::storage::Storage,
     state::AppState,

@@ -109,7 +109,10 @@ async fn update(
         .ok_or_else(|| not_found("Inventory"))?;
     require_changed_update(&[
         ("quantity", body.quantity.map(|v| v == m.quantity)),
-        ("reservedQuantity", body.reserved_quantity.map(|v| v == m.reserved_quantity)),
+        (
+            "reservedQuantity",
+            body.reserved_quantity.map(|v| v == m.reserved_quantity),
+        ),
         ("isActive", body.is_active.map(|v| v == m.is_active)),
     ])?;
     // Original InventoryService validates only that submitted fields changed;

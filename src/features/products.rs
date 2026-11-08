@@ -344,9 +344,15 @@ async fn update(
     }
     require_changed_update(&[
         ("categoryId", b.category_id.map(|v| v == m.category_id)),
-        ("discountId", b.discount_id.as_ref().map(|v| v == &m.discount_id)),
+        (
+            "discountId",
+            b.discount_id.as_ref().map(|v| v == &m.discount_id),
+        ),
         ("name", b.name.as_ref().map(|v| v == &m.name)),
-        ("description", b.description.as_ref().map(|v| v == &m.description)),
+        (
+            "description",
+            b.description.as_ref().map(|v| v == &m.description),
+        ),
         ("price", b.price.map(|v| v == m.price)),
         ("isActive", b.is_active.map(|v| v == m.is_active)),
     ])?;

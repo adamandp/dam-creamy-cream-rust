@@ -116,7 +116,13 @@ async fn create(
         .require_admin()?;
     let start = parse_datetime(&b.start_date)?;
     let end = parse_datetime(&b.end_date)?;
-    validate(&b.code, &b.name, b.description.as_deref(), b.value, b.minimum_purchase)?;
+    validate(
+        &b.code,
+        &b.name,
+        b.description.as_deref(),
+        b.value,
+        b.minimum_purchase,
+    )?;
     if let Some(id) = b.product_id
         && product::Entity::find_by_id(id)
             .one(&s.db)
@@ -214,7 +220,10 @@ async fn update(
     validate(
         b.code.as_deref().unwrap_or(&m.code),
         b.name.as_deref().unwrap_or(&m.name),
-        b.description.as_ref().map(|v| v.as_deref()).unwrap_or(m.description.as_deref()),
+        b.description
+            .as_ref()
+            .map(|v| v.as_deref())
+            .unwrap_or(m.description.as_deref()),
         b.value.unwrap_or(m.value),
         b.minimum_purchase.unwrap_or(m.minimum_purchase),
     )?;
@@ -230,18 +239,33 @@ async fn update(
     require_changed_update(&[
         ("code", b.code.as_ref().map(|v| v == &m.code)),
         ("name", b.name.as_ref().map(|v| v == &m.name)),
-        ("description", b.description.as_ref().map(|v| v == &m.description)),
+        (
+            "description",
+            b.description.as_ref().map(|v| v == &m.description),
+        ),
         ("type", b.r#type.as_ref().map(|v| v == &m.r#type)),
         ("group", b.group.as_ref().map(|v| v == &m.group)),
         ("value", b.value.as_ref().map(|v| v == &m.value)),
-        ("productId", b.product_id.as_ref().map(|v| v == &m.product_id)),
+        (
+            "productId",
+            b.product_id.as_ref().map(|v| v == &m.product_id),
+        ),
         ("quantity", b.quantity.as_ref().map(|v| v == &m.quantity)),
-        ("minimumPurchase", b.minimum_purchase.map(|v| v == m.minimum_purchase)),
+        (
+            "minimumPurchase",
+            b.minimum_purchase.map(|v| v == m.minimum_purchase),
+        ),
         ("isActive", b.is_active.map(|v| v == m.is_active)),
-        ("startDate", b.start_date.as_ref().map(|_| start == m.start_date)),
+        (
+            "startDate",
+            b.start_date.as_ref().map(|_| start == m.start_date),
+        ),
         ("endDate", b.end_date.as_ref().map(|_| end == m.end_date)),
         ("maxRedeemed", b.max_redeemed.map(|v| v == m.max_redeemed)),
-        ("redeemedCount", b.redeemed_count.map(|v| v == m.redeemed_count)),
+        (
+            "redeemedCount",
+            b.redeemed_count.map(|v| v == m.redeemed_count),
+        ),
     ])?;
     let mut a: voucher::ActiveModel = m.into();
     if let Some(v) = b.code {

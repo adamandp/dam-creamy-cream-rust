@@ -191,21 +191,39 @@ async fn update(
         .map(parse_datetime)
         .transpose()?
         .unwrap_or(m.end_date);
-    validate(b.name.as_deref().unwrap_or(&m.name), b.value.unwrap_or(m.value))?;
+    validate(
+        b.name.as_deref().unwrap_or(&m.name),
+        b.value.unwrap_or(m.value),
+    )?;
     if let Some(Some(d)) = &b.description {
         require_text(d, 1, 255, "description")?;
     }
     require_changed_update(&[
         ("name", b.name.as_ref().map(|v| v == &m.name)),
-        ("discountType", b.discount_type.as_ref().map(|v| v == &m.discount_type)),
+        (
+            "discountType",
+            b.discount_type.as_ref().map(|v| v == &m.discount_type),
+        ),
         ("value", b.value.as_ref().map(|v| v == &m.value)),
         ("maxApplied", b.max_applied.map(|v| v == m.max_applied)),
         ("maxRedeemed", b.max_redeemed.map(|v| v == m.max_redeemed)),
-        ("redeemedCount", b.redeemed_count.map(|v| v == m.redeemed_count)),
-        ("description", b.description.as_ref().map(|v| v == &m.description)),
-        ("productId", b.product_id.as_ref().map(|v| v == &m.product_id)),
+        (
+            "redeemedCount",
+            b.redeemed_count.map(|v| v == m.redeemed_count),
+        ),
+        (
+            "description",
+            b.description.as_ref().map(|v| v == &m.description),
+        ),
+        (
+            "productId",
+            b.product_id.as_ref().map(|v| v == &m.product_id),
+        ),
         ("quantity", b.quantity.as_ref().map(|v| v == &m.quantity)),
-        ("startDate", b.start_date.as_ref().map(|_| start == m.start_date)),
+        (
+            "startDate",
+            b.start_date.as_ref().map(|_| start == m.start_date),
+        ),
         ("endDate", b.end_date.as_ref().map(|_| end == m.end_date)),
     ])?;
     let mut a: discount::ActiveModel = m.into();

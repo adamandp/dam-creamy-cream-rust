@@ -154,7 +154,10 @@ async fn update(
     }
     require_changed_update(&[
         ("name", body.name.as_ref().map(|v| *v == m.name)),
-        ("description", body.description.as_ref().map(|v| *v == m.description)),
+        (
+            "description",
+            body.description.as_ref().map(|v| *v == m.description),
+        ),
         ("isActive", body.is_active.map(|v| v == m.is_active)),
     ])?;
     let mut a: category::ActiveModel = m.into();
