@@ -64,23 +64,11 @@ const cases = [
 // Report these historical issues independently rather than mask mismatches in
 // the stable 400/404 API contract with status-only assertions.
 const legacyExceptions = new Set([
-  'health external ping',
-  'health database ping',
   'review list legacy decorators',
   'review by me legacy decorators',
   'user voucher by user route order',
   'category bad UUID',
   'inventory bad UUID',
-  'category invalid name',
-  'category empty name',
-  'category wrong boolean',
-  'product invalid price',
-  'product unknown fields',
-  'discount missing nullable',
-  'voucher missing nullable',
-  'review invalid rating',
-  'address invalid phone',
-  'address unknown field',
 ]);
 
 async function invoke(base, path, method = 'GET', body) {

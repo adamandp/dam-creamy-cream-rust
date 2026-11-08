@@ -167,7 +167,13 @@ fn validate(name: &str, description: Option<&str>, price: f64) -> AppResult<()> 
     if let Some(d) = description {
         require_text(d, 1, 255, "description")?;
     }
-    require_positive(price, 1000.0, 1_000_000.0, "price")
+    if price < 1000.0 {
+        return Err(AppError::Validation(vec![json!({"origin":"number","code":"too_small","minimum":1000,"inclusive":true,"path":["price"],"message":"💰 price must be at least Rp1.000. Don't be cheap! 🤑 {Price Too Low}"})]));
+    }
+    if price > 1_000_000.0 {
+        return Err(AppError::Validation(vec![json!({"origin":"number","code":"too_big","maximum":1000000,"inclusive":true,"path":["price"],"message":"💰 price must be less than Rp1,000,000. Don't be greedy! 🤑 {Price Too High}"})]));
+    }
+    Ok(())
 }
 
 async fn create(

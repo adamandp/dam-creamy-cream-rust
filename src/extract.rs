@@ -54,20 +54,60 @@ where
 // Preserve that shape for the common query DTOs and required create fields.
 fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     let class_name = std::any::type_name::<T>();
-    if !(class_name.ends_with("categories::Create") || class_name.ends_with("products::Create")) {
+    let is_category = class_name.ends_with("::categories::Create");
+    let is_discount = class_name.ends_with("::discounts::Create");
+    let is_voucher = class_name.ends_with("::vouchers::Create");
+    let is_product = class_name.ends_with("::products::Create");
+    let is_address = class_name.ends_with("::addresses::CreateAddressBody");
+    if !(is_category
+        || is_discount
+        || is_voucher
+        || is_product
+        || class_name.ends_with("reviews::Create")
+        || class_name.ends_with("product_discounts::Create")
+        || is_address)
+    {
         return None;
+    }
+    if (is_product || is_address)
+        && let Some(field) = message
+            .split("unknown field `")
+            .nth(1)
+            .and_then(|rest| rest.split('`').next())
+    {
+        return Some(AppError::Validation(vec![json!({
+            "code":"unrecognized_keys","keys":[field],"path":[],
+            "message":format!("Unrecognized key: \"{field}\"")
+        })]));
+    }
+    if message.contains("isActive: invalid type:") && message.contains("expected a boolean") {
+        return Some(AppError::Validation(vec![json!({
+            "expected":"boolean","code":"invalid_type","path":["isActive"],
+            "message":"⚖️ Is Active must be either true or false. No Schrödinger values! 🐱 {Invalid Boolean}"
+        })]));
     }
     let field = message.split("missing field `").nth(1)?.split('`').next()?;
     let (expected, display) = match field {
+        "name" if is_category => ("string", "Category Name"),
+        "name" if is_discount => ("string", "Discount Name"),
         "name" => ("string", "Name"),
         "description" => ("string", "Description"),
-        "isActive" => ("boolean", "IsActive"),
+        "isActive" => ("boolean", "Is Active"),
+        "price" => ("number", "price"),
+        "value" => ("number", "Value"),
+        "quantity" => ("number", "Quantity"),
+        "rating" => ("number", "Rating"),
+        "productId" | "categoryId" | "discountId" | "userId" | "voucherId" => ("string", ""),
         _ => return None,
     };
-    let message = match expected {
-        "string" => {
+    let message = match (expected, display) {
+        ("string", "") => "Invalid input: expected string, received undefined".to_owned(),
+        ("string", _) => {
             format!("📜 {display} must be a valid text. No weird symbols! 🚫 {{Invalid String}}")
         }
+        ("number", _) => format!(
+            "🔢 {display} must be a valid number. No funky math here! 🚫 {{Invalid Number}}"
+        ),
         _ => format!(
             "⚖️ {display} must be either true or false. No Schrödinger values! 🐱 {{Invalid Boolean}}"
         ),

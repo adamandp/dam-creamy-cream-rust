@@ -55,6 +55,20 @@ pub fn body(m: category::Model) -> Value {
     json!({"id":m.id,"name":m.name,"description":m.description,"isActive":m.is_active,"createdAt":created_at,"updatedAt":updated_at})
 }
 
+fn name_validation_issues(name: &str) -> Vec<Value> {
+    let mut issues = Vec::new();
+    let len = name.chars().count();
+    if len < 1 {
+        issues.push(json!({"origin":"string","code":"too_small","minimum":1,"inclusive":true,"path":["name"],"message":"🔡 Category Name must be at least 1 characters. Keep going! 💪 {Minimum Length}"}));
+    } else if len > 100 {
+        issues.push(json!({"origin":"string","code":"too_big","maximum":100,"inclusive":true,"path":["name"],"message":"🚀 Whoa! Category Name is too long. Maximum allowed is 100 characters! ✍️ {Maximum Length}"}));
+    }
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphabetic() || c.is_whitespace()) {
+        issues.push(json!({"origin":"string","code":"invalid_format","format":"regex","pattern":"/^[A-Za-z\\s]+$/","path":["name"],"message":"Just letters & spaces, no secret codes! 🤨 {Name Only Letters}"}));
+    }
+    issues
+}
+
 async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -63,6 +77,10 @@ async fn create(
     authorization::authenticate(&state, &headers)
         .await?
         .require_admin()?;
+    let name_issues = name_validation_issues(&body.name);
+    if !name_issues.is_empty() {
+        return Err(AppError::Validation(name_issues));
+    }
     require_name(&body.name, 1, 100, "name")?;
     if let Some(d) = &body.description {
         require_text(d, 1, 255, "description")?;
@@ -148,6 +166,10 @@ async fn update(
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Category"))?;
     if let Some(v) = &body.name {
+        let name_issues = name_validation_issues(v);
+        if !name_issues.is_empty() {
+            return Err(AppError::Validation(name_issues));
+        }
         require_name(v, 1, 100, "name")?;
     }
     if let Some(Some(v)) = &body.description {

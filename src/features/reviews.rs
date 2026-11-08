@@ -58,7 +58,12 @@ pub fn body(m: review::Model) -> Value {
 
 fn validate(rating: i32, comment: Option<&str>) -> AppResult<()> {
     if !(1..=5).contains(&rating) {
-        return Err(AppError::BadRequest("rating must be 1–5".into()));
+        let issue = if rating < 1 {
+            json!({"origin":"number","code":"too_small","minimum":1,"inclusive":true,"path":["rating"],"message":"🔡 Rating must be at least 1 characters. Keep going! 💪 {Minimum Length}"})
+        } else {
+            json!({"origin":"number","code":"too_big","maximum":5,"inclusive":true,"path":["rating"],"message":"🚀 Whoa! Rating is too long. Maximum allowed is 5 characters! ✍️ {Maximum Length}"})
+        };
+        return Err(AppError::Validation(vec![issue]));
     }
     if let Some(v) = comment {
         require_text(v, 1, 255, "comment")?;
