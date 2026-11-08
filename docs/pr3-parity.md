@@ -21,7 +21,7 @@ Reference: `adamandp/dam-creamy-cream-be@7a3407b` (NestJS). Base: Rust PR2 `feat
 - `orders::find_all` ports the Nest CQRS query (also not publicly routed).
 - `orders::checkout::execute` ports the CQRS command sequence: user, address, product, cart, voucher, user voucher, discount, inventory, cart item, product-discount validation; quantity/counter updates; item and voucher arithmetic; order, order items, free items, voucher links, payment and shipment creation.
 - Everything is performed inside **one SeaORM transaction**, preserving rollback and row locking. A failing late order-voucher insert must roll back reserved inventory, cart decrement, discount redemption, voucher use, and partial order rows.
-- SeaORM maps the pre-existing quoted PostgreSQL column `order_items.\"finalPrice\"` exactly. The Prisma schema does **not** map this field to `final_price`.
+- SeaORM maps the pre-existing quoted PostgreSQL column `order_items."finalPrice"` exactly. The Prisma schema does **not** map this field to `final_price`.
 - Shipping voucher is applied to shipping cost, checkout voucher to discounted item total, first matching voucher of each group. Payment method and `method_type` match the Nest create step.
 
 ## Intentional differences from a literal port
