@@ -126,7 +126,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
     ))
     .await
     .unwrap();
-    let mut options = ConnectOptions::new(url);
+    let mut options = ConnectOptions::new(url.clone());
     options.max_connections(1).min_connections(1);
     let db = Database::connect(options).await.unwrap();
     db.execute_raw(Statement::from_string(
@@ -157,7 +157,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
         "CREATE TABLE vouchers (id UUID PRIMARY KEY,code VARCHAR(50) NOT NULL,name VARCHAR(50) NOT NULL,description VARCHAR(255),type \"VOUCHER_TYPE\" NOT NULL,\"group\" \"VOUCHER_GROUP\" NOT NULL,value DOUBLE PRECISION,product_id UUID,quantity INTEGER,minimum_purchase DOUBLE PRECISION NOT NULL,is_active BOOLEAN NOT NULL,start_date TIMESTAMP NOT NULL,end_date TIMESTAMP NOT NULL,max_redeemed INTEGER NOT NULL,redeemed_count INTEGER NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE user_vouchers (id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id),voucher_id UUID NOT NULL REFERENCES vouchers(id),status \"USER_VOUCHER_STATUS\" NOT NULL,claimed_at TIMESTAMP NOT NULL,expired_at TIMESTAMP NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE orders (id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id),address_id UUID NOT NULL REFERENCES addresses(id),voucher_amount DOUBLE PRECISION NOT NULL,discount_amount DOUBLE PRECISION NOT NULL,total_price DOUBLE PRECISION NOT NULL,final_price DOUBLE PRECISION NOT NULL,status \"ORDER_STATUS\" NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
-        "CREATE TABLE order_items (id UUID PRIMARY KEY,order_id UUID NOT NULL REFERENCES orders(id),product_id UUID NOT NULL REFERENCES products(id),discount_id UUID,discount_amount DOUBLE PRECISION NOT NULL,price DOUBLE PRECISION NOT NULL,final_price DOUBLE PRECISION NOT NULL,quantity INTEGER NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
+        "CREATE TABLE order_items (id UUID PRIMARY KEY,order_id UUID NOT NULL REFERENCES orders(id),product_id UUID NOT NULL REFERENCES products(id),discount_id UUID,discount_amount DOUBLE PRECISION NOT NULL,price DOUBLE PRECISION NOT NULL,\"finalPrice\" DOUBLE PRECISION NOT NULL,quantity INTEGER NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE order_vouchers (order_id UUID NOT NULL REFERENCES orders(id),voucher_id UUID NOT NULL REFERENCES vouchers(id),PRIMARY KEY(order_id,voucher_id))",
         "CREATE TABLE payments (id UUID PRIMARY KEY,order_id UUID NOT NULL REFERENCES orders(id),method VARCHAR(50) NOT NULL,method_type VARCHAR(50) NOT NULL,amount DOUBLE PRECISION NOT NULL,status \"PAYMENT_STATUS\" NOT NULL,transaction_code VARCHAR(255),transaction_id VARCHAR(255),expiry_date TIMESTAMP,paid_at TIMESTAMP,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
         "CREATE TABLE shipments (id UUID PRIMARY KEY,order_id UUID NOT NULL REFERENCES orders(id),courier VARCHAR(50) NOT NULL,service VARCHAR(50) NOT NULL,cost DOUBLE PRECISION NOT NULL,estimated TIMESTAMP NOT NULL,delivered_at TIMESTAMP,description VARCHAR(255),tracking_number VARCHAR(50),status \"SHIPMENT_STATUS\" NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)",
@@ -247,7 +247,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
     inventory::ActiveModel {
         id: Set(Uuid::new_v4()),
         product_id: Set(product_id),
-        quantity: Set(2),
+        quantity: Set(4),
         reserved_quantity: Set(0),
         is_active: Set(true),
         created_at: Set(now),
@@ -270,7 +270,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
         id: Set(Uuid::new_v4()),
         cart_id: Set(cart_id),
         product_id: Set(product_id),
-        quantity: Set(3),
+        quantity: Set(5),
         created_at: Set(now),
         updated_at: Set(now),
     }
@@ -356,7 +356,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
     let app = crate::router(state.clone());
     let (status, body) = send(app.clone(), Method::GET, "/carts/user", Some(&token), None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["data"][0]["qty"], 3);
+    assert_eq!(body["data"][0]["qty"], 5);
 
     let payload = json!({"order":{"userId":user_id,"addressId":address_id,"voucherIds":[voucher_id,voucher_id]},
         "orderItems":[{"productId":product_id,"discountId":discount_id,"quantity":2}],
@@ -384,7 +384,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
             .unwrap()
             .unwrap()
             .quantity,
-        3
+        5
     );
     assert_eq!(
         discount::Entity::find()
@@ -457,7 +457,7 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
             .unwrap()
             .unwrap()
             .quantity,
-        1
+        3
     );
     assert_eq!(
         discount::Entity::find()
@@ -477,10 +477,54 @@ async fn postgres_checkout_rolls_back_late_failure_then_commits_related_rows() {
             .status,
         user_voucher::UserVoucherStatus::Used
     );
-    assert!(checkout::execute(&state,serde_json::from_value(json!({"order":{"userId":user_id,"addressId":address_id},
-        "orderItems":[{"productId":product_id,"quantity":1}],
+    // Independent database connections really compete on PostgreSQL row locks.
+    // With two units left, exactly one of two simultaneous checkouts can win.
+    let mut concurrent_options = ConnectOptions::new(url);
+    concurrent_options.max_connections(1).min_connections(1);
+    let concurrent_db = Database::connect(concurrent_options).await.unwrap();
+    concurrent_db
+        .execute_raw(Statement::from_string(
+            DbBackend::Postgres,
+            format!("SET search_path TO \"{schema}\""),
+        ))
+        .await
+        .unwrap();
+    let concurrent_state = AppState {
+        db: concurrent_db,
+        ..state.clone()
+    };
+    let input: CheckoutInput = serde_json::from_value(json!({"order":{"userId":user_id,"addressId":address_id},
+        "orderItems":[{"productId":product_id,"quantity":2}],
         "shipment":{"courier":"jne","service":"REG","cost":20,"estimated":"2026-11-11","description":null},
-        "payment":{"method":"BCA"}})).unwrap()).await.is_err(),"stock is reserved");
+        "payment":{"method":"BCA"}}))
+    .unwrap();
+    let (first, second) = tokio::join!(
+        checkout::execute(&state, input.clone()),
+        checkout::execute(&concurrent_state, input)
+    );
+    assert!(
+        first.is_ok() ^ second.is_ok(),
+        "only one concurrent checkout can reserve remaining stock: {first:?} / {second:?}"
+    );
+    assert_eq!(
+        inventory::Entity::find()
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .reserved_quantity,
+        4
+    );
+    assert_eq!(
+        cart_item::Entity::find()
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .quantity,
+        1
+    );
+    assert_eq!(order::Entity::find().all(&db).await.unwrap().len(), 2);
     let (status, body) = send(app, Method::GET, "/payments", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(

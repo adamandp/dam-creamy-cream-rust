@@ -10,6 +10,7 @@ pub struct Model {
     pub discount_id: Option<Uuid>,
     pub discount_amount: f64,
     pub price: f64,
+    #[sea_orm(column_name = "finalPrice")]
     pub final_price: f64,
     pub quantity: i32,
     pub created_at: DateTime,
