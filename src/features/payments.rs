@@ -38,7 +38,7 @@ fn js_number(s: &str) -> String {
             let sign = if n.is_sign_negative() { "-" } else { "" };
             format!("{sign}Infinity")
         }
-        Ok(n) if n == 0.0 => "0".into(),
+        Ok(0.0) => "0".into(),
         Ok(n) => n.to_string(),
         Err(_) => "NaN".into(),
     }
