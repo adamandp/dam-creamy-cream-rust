@@ -48,7 +48,7 @@ async fn external() -> (StatusCode, Json<Value>) {
 async fn database(State(state): State<AppState>) -> AppResult<Json<Value>> {
     state
         .db
-        .execute(&Statement::from_string(DbBackend::Postgres, "SELECT 1"))
+        .query_one_raw(Statement::from_string(DbBackend::Postgres, "SELECT 1"))
         .await
         .map_err(AppError::db)?;
     Ok(Json(json!({"db":{"status":"up"}})))
