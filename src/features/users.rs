@@ -30,7 +30,7 @@ use crate::{
 };
 
 #[derive(Deserialize, Validate)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateUserBody {
     #[validate(length(min = 5, max = 50))]
     pub username: String,
@@ -258,7 +258,9 @@ pub async fn create_internal(state: &AppState, input: CreateUserBody) -> AppResu
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     validate_name(&input.username, 5, 50, "username")?;
-    validate_name(&input.full_name, 1, 100, "fullName")?;
+    // Full Name uses stringMinMax in the Nest DTO; only username uses
+    // baseName's letters/spaces regular expression.
+    validate_text(&input.full_name, 1, 100, "fullName")?;
     if let Some(ref email) = input.email {
         validate_email(email)?;
     }
@@ -330,7 +332,7 @@ async fn find_all(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("User"));
+        return Err(crate::common::plain_not_found("User"));
     }
     let rows = user::Entity::find()
         .order_by_asc(user::Column::CreatedAt)
@@ -447,7 +449,7 @@ async fn update(
         validate_name(name, 5, 50, "username")?;
     }
     if let Some(ref name) = input.full_name {
-        validate_name(name, 1, 100, "fullName")?;
+        validate_text(name, 1, 100, "fullName")?;
     }
     if let Some(Some(ref email)) = input.email {
         validate_email(email)?;

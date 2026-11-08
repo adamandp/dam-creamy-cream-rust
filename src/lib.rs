@@ -7,6 +7,9 @@ pub mod features;
 pub mod infrastructure;
 pub mod state;
 
+#[cfg(test)]
+mod pr2_tests;
+
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
@@ -33,12 +36,26 @@ pub fn router(state: AppState) -> Router {
         )
     };
     Router::new()
+        .nest("/health", features::health::routes())
         .nest("/auth", features::auth::routes())
         .route("/sessions/refresh", post(features::session::refresh))
         .nest("/roles", features::roles::routes())
         .nest("/users", features::users::routes())
         .nest("/addresses", features::addresses::routes())
+        .nest("/categories", features::categories::routes())
+        .nest("/products", features::products::routes())
+        .nest("/product", features::product::routes())
+        .nest("/inventory", features::inventory::routes())
+        .nest("/reviews", features::reviews::routes())
+        .nest("/discounts", features::discounts::routes())
+        .nest("/product-discounts", features::product_discounts::routes())
+        .nest("/vouchers", features::vouchers::routes())
+        .nest("/user-vouchers", features::user_vouchers::routes())
         .route("/media/users/{id}/{asset}", get(features::users::get_image))
+        .route(
+            "/media/products/{id}/{asset}",
+            get(features::products::get_image),
+        )
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -649,7 +666,7 @@ mod tests {
             })
         };
         let mut invalid_postal_code = address_body("Invalid postal", false);
-        invalid_postal_code["postalCode"] = json!("X".repeat(51));
+        invalid_postal_code["postalCode"] = json!("X".repeat(101));
         assert_eq!(
             send_json(
                 app.clone(),
@@ -733,7 +750,7 @@ mod tests {
                 axum::http::Method::PATCH,
                 format!("/addresses/{first}"),
                 owner_token.clone(),
-                json!({"postalCode": "X".repeat(51)})
+                json!({"postalCode": "X".repeat(101)})
             )
             .await,
             StatusCode::BAD_REQUEST

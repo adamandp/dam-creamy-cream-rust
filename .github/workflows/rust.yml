@@ -22,17 +22,154 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/creamy_cream_test
+      TEST_MINIO_ENDPOINT: http://127.0.0.1:9000
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.8'
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/minio
+          key: minio-linux-amd64-RELEASE-2025-10-15T17-29-55Z
+      - name: Start isolated MinIO for S3 integration tests
+        run: |
+          minio_binary="$RUNNER_TEMP/minio"
+          if [ ! -s "$minio_binary" ]; then
+            if ! curl --fail --location --silent --show-error --retry 2 \
+              --output "$minio_binary" \
+              https://dl.min.io/server/minio/release/linux-amd64/archive/minio.RELEASE.2025-10-15T17-29-55Z; then
+              # The MinIO community no longer publishes all prebuilt binaries.
+              # Build a pinned official release rather than skipping S3 tests.
+              GOBIN="$RUNNER_TEMP/minio-bin" \
+                go install github.com/minio/minio@RELEASE.2025-10-15T17-29-55Z
+              cp "$RUNNER_TEMP/minio-bin/minio" "$minio_binary"
+            fi
+          fi
+          chmod +x "$minio_binary"
+          mkdir -p "$RUNNER_TEMP/creamy-minio-data"
+          MINIO_ROOT_USER=test-access-key MINIO_ROOT_PASSWORD=test-secret-key \
+          MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:5173 \
+            "$minio_binary" server "$RUNNER_TEMP/creamy-minio-data" --address :9000 \
+            > "$RUNNER_TEMP/creamy-minio.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/creamy-minio.log"
+          exit 1
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --all-targets --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build pinned NestJS reference and Rust API
+        run: |
+          git clone --quiet https://github.com/adamandp/dam-creamy-cream-be.git "$RUNNER_TEMP/nest-reference"
+          git -C "$RUNNER_TEMP/nest-reference" checkout --quiet 7a3407b
+          cd "$RUNNER_TEMP/nest-reference"
+          npm ci --no-audit --no-fund
+          npx prisma generate
+          npm run build
+          # This Nest app emits dist/src/main.js when prisma.config.ts is
+          # included in TypeScript's root; resolve either layout explicitly.
+          nest_entry="$RUNNER_TEMP/nest-reference/dist/src/main.js"
+          if [ ! -f "$nest_entry" ]; then
+            nest_entry="$RUNNER_TEMP/nest-reference/dist/main.js"
+          fi
+          test -f "$nest_entry"
+          # Legacy absolute `src/...` imports need a runtime module alias.
+          compiled_src="$(dirname "$nest_entry")"
+          if [ ! -e "$RUNNER_TEMP/nest-reference/node_modules/src" ]; then
+            ln -s "$compiled_src" "$RUNNER_TEMP/nest-reference/node_modules/src"
+          fi
+          cd "$GITHUB_WORKSPACE"
+          cargo build --locked
+      - name: Seed two isolated, identically migrated databases
+        run: |
+          export PGPASSWORD=postgres
+          psql --host localhost --username postgres --dbname postgres --set ON_ERROR_STOP=1 \
+            --command 'CREATE DATABASE creamy_nest'
+          psql --host localhost --username postgres --dbname postgres --set ON_ERROR_STOP=1 \
+            --command 'CREATE DATABASE creamy_rust'
+          for name in creamy_nest creamy_rust; do
+            (cd "$RUNNER_TEMP/nest-reference" && \
+              DATABASE_URL="postgres://postgres:postgres@localhost:5432/$name" \
+              npx prisma migrate deploy)
+            psql --host localhost --username postgres --dbname "$name" \
+              --set ON_ERROR_STOP=1 --file scripts/parity/seed.sql
+          done
+      - name: Compare NestJS and Axum HTTP contracts
+        env:
+          ACCESS_JWT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          REFRESH_JWT_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          COOKIE_SECRET_KEY: parity-cookie-not-production
+        run: |
+          nest_entry="$RUNNER_TEMP/nest-reference/dist/src/main.js"
+          if [ ! -f "$nest_entry" ]; then
+            nest_entry="$RUNNER_TEMP/nest-reference/dist/main.js"
+          fi
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_nest \
+          REDIS_URL=redis://127.0.0.1:6379/0 PORT=3101 \
+            node "$nest_entry" \
+            > "$RUNNER_TEMP/nest-parity.log" 2>&1 &
+          nest_pid=$!
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_rust \
+          REDIS_URL=redis://127.0.0.1:6379/1 PORT=3102 \
+          MINIO_ENDPOINT=http://127.0.0.1:9000 \
+          MINIO_ACCESS_KEY=test-access-key \
+          MINIO_SECRET_KEY=test-secret-key \
+          MINIO_BUCKET=creamy-cream-parity \
+          PUBLIC_BASE_URL=http://127.0.0.1:3102 \
+            target/debug/dam-creamy-cream-rust \
+            > "$RUNNER_TEMP/rust-parity.log" 2>&1 &
+          rust_pid=$!
+          ready=0
+          for attempt in $(seq 1 45); do
+            if ! kill -0 "$nest_pid" || ! kill -0 "$rust_pid"; then
+              break
+            fi
+            # HTTP status is part of differential testing, not readiness;
+            # a legacy 4xx/5xx should not be hidden by a boot timeout.
+            if curl --silent --output /dev/null 'http://127.0.0.1:3101/roles?page=1&limit=10' && \
+               curl --silent --output /dev/null 'http://127.0.0.1:3102/roles?page=1&limit=10'; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            tail -100 "$RUNNER_TEMP/nest-parity.log"
+            tail -100 "$RUNNER_TEMP/rust-parity.log"
+            exit 1
+          fi
+          parity_status=0
+          node scripts/parity/compare.mjs || parity_status=1
+          node scripts/parity/errors.mjs || parity_status=1
+          node scripts/parity/upload.mjs || parity_status=1
+          if [ "$parity_status" != 0 ]; then
+            tail -80 "$RUNNER_TEMP/nest-parity.log"
+            tail -80 "$RUNNER_TEMP/rust-parity.log"
+            exit 1
+          fi

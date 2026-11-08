@@ -44,10 +44,11 @@ pub struct CreateAddressBody {
     pub subdistrict: String,
     #[validate(length(min = 1, max = 100))]
     pub village: String,
-    #[validate(length(max = 50))]
+    #[validate(length(max = 100))]
     pub postal_code: String,
     #[validate(length(min = 1, max = 100))]
     pub address: String,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_bool")]
     pub is_primary: bool,
 }
 
@@ -67,10 +68,11 @@ pub struct UpdateAddressBody {
     pub subdistrict: Option<String>,
     #[validate(length(min = 1, max = 100))]
     pub village: Option<String>,
-    #[validate(length(max = 50))]
+    #[validate(length(max = 100))]
     pub postal_code: Option<String>,
     #[validate(length(min = 1, max = 100))]
     pub address: Option<String>,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_bool_optional")]
     pub is_primary: Option<bool>,
 }
 
@@ -93,6 +95,20 @@ fn validate_recipient_phone(value: &str) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+fn phone_validation_issues(phone: &str) -> Vec<Value> {
+    let mut issues = Vec::new();
+    let len = phone.chars().count();
+    if len < 4 {
+        issues.push(json!({"origin":"string","code":"too_small","minimum":4,"inclusive":true,"path":["recipientPhoneNumber"],"message":"🔡 Phone number must be at least 4 characters. Keep going! 💪 {Minimum Length}"}));
+    } else if len > 100 {
+        issues.push(json!({"origin":"string","code":"too_big","maximum":100,"inclusive":true,"path":["recipientPhoneNumber"],"message":"🚀 Whoa! Phone number is too long. Maximum allowed is 100 characters! ✍️ {Maximum Length}"}));
+    }
+    if !(10..=15).contains(&phone.len()) || !phone.bytes().all(|c| c.is_ascii_digit()) {
+        issues.push(json!({"origin":"string","code":"invalid_format","format":"regex","pattern":"/^\\d{10,15}$/","path":["recipientPhoneNumber"],"message":"📞 Invalid phone number! Double-check and try again! 🤳 {Invalid Phone}"}));
+    }
+    issues
 }
 
 fn response(model: address::Model) -> Value {
@@ -170,6 +186,10 @@ async fn create(
     authorization::authenticate(&state, &headers)
         .await?
         .require_owner_or_admin(body.user_id)?;
+    let issues = phone_validation_issues(&body.recipient_phone_number);
+    if !issues.is_empty() {
+        return Err(AppError::Validation(issues));
+    }
     body.validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     validate_recipient_name(&body.recipient_name)?;
@@ -298,6 +318,12 @@ async fn update(
 ) -> AppResult<Json<Value>> {
     let id = parse_uuid(&id)?;
     let actor = authorization::authenticate(&state, &headers).await?;
+    if let Some(phone) = body.recipient_phone_number.as_deref() {
+        let issues = phone_validation_issues(phone);
+        if !issues.is_empty() {
+            return Err(AppError::Validation(issues));
+        }
+    }
     body.validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     if let Some(name) = body.recipient_name.as_deref() {
