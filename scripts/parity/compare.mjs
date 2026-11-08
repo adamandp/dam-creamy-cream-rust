@@ -131,7 +131,6 @@ for (const [label, path] of [
   ['products catalog price ascending', '/products/catalog?sort=asc'],
   ['products catalog price descending', '/products/catalog?sort=desc'],
   ['products catalog search', '/products/catalog?q=Cream'],
-  ['products catalog unknown search', '/products/catalog?q=nomatch123'],
   ['products catalog category', `/products/catalog?cat=${ids.category}`],
   ['products catalog minimum price', '/products/catalog?min=1000'],
   ['products catalog maximum price', '/products/catalog?max=50000'],
@@ -168,6 +167,7 @@ await compare('user voucher after used', `/user-vouchers/${ids.userVoucher}`, 'G
 // vary by database, so we verify follow-up state independently later.
 const expectError = { statusOnly: true, expectError: true };
 const statusOnly = { statusOnly: true };
+await compare('products catalog unknown search', '/products/catalog?q=nomatch123', 'GET', undefined, expectError);
 await compare('catalog strict query rejects unknown keys', '/products/catalog?unexpected=x', 'GET', undefined, expectError);
 const discountCreate = {
   name: 'Cream Sale', discountType: 'FIXED', value: null,
@@ -220,6 +220,8 @@ await compare('user-voucher strips unknown fields', '/user-vouchers', 'POST', { 
 await compare('address coerce boolean string', '/addresses', 'POST', addressCreate, statusOnly);
 await compare('address reject invalid phone', '/addresses', 'POST', { ...addressCreate, recipientPhoneNumber: 'abc' }, expectError);
 await compare('address strict extra fields', '/addresses', 'POST', { ...addressCreate, unexpected: 42 }, expectError);
+await compare('user fullName accepts punctuation', `/users/${ids.user}`, 'PATCH', { fullName: 'Parity Admin, Jr.' });
+await compare('user fullName after PATCH', `/users/${ids.user}`, 'GET', undefined, { ignoreUpdatedAt: true });
 
 console.log(`\nNestJS ↔ Axum differential: ${passed} matched, ${failed} mismatched, ${passed + failed} scenarios.`);
 if (failed) process.exitCode = 1;

@@ -258,7 +258,9 @@ pub async fn create_internal(state: &AppState, input: CreateUserBody) -> AppResu
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     validate_name(&input.username, 5, 50, "username")?;
-    validate_name(&input.full_name, 1, 100, "fullName")?;
+    // Full Name uses stringMinMax in the Nest DTO; only username uses
+    // baseName's letters/spaces regular expression.
+    validate_text(&input.full_name, 1, 100, "fullName")?;
     if let Some(ref email) = input.email {
         validate_email(email)?;
     }
@@ -447,7 +449,7 @@ async fn update(
         validate_name(name, 5, 50, "username")?;
     }
     if let Some(ref name) = input.full_name {
-        validate_name(name, 1, 100, "fullName")?;
+        validate_text(name, 1, 100, "fullName")?;
     }
     if let Some(Some(ref email)) = input.email {
         validate_email(email)?;
