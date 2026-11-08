@@ -34,34 +34,34 @@ const token = `${unsigned}.${createHmac('sha256', secret).update(unsigned).diges
 
 const cases = [
   // PR1: roles, users and addresses. Each endpoint gets the identical JWT.
-  ['roles list', '/roles/?page=1&limit=10'],
+  ['roles list', '/roles?page=1&limit=10'],
   ['roles detail', `/roles/${ids.role}`],
   ['roles by name', '/roles/name/super-admin'],
-  ['users list', '/users/?page=1&limit=10'],
+  ['users list', '/users?page=1&limit=10'],
   ['users detail', `/users/${ids.user}`],
-  ['addresses list', '/addresses/?page=1&limit=10'],
+  ['addresses list', '/addresses?page=1&limit=10'],
   ['addresses detail', `/addresses/${ids.address}`],
 
   // PR2: catalog and promotions, including relationships and paging.
-  ['categories list', '/categories/?page=1&limit=10'],
+  ['categories list', '/categories?page=1&limit=10'],
   ['categories detail', `/categories/${ids.category}`],
-  ['products list', '/products/?page=1&limit=10'],
+  ['products list', '/products?page=1&limit=10'],
   ['products catalog', '/products/catalog?page=1&limit=10'],
   ['product detail', `/product/${ids.product}`],
   ['product formatted information', `/product/information/${ids.product}`],
-  ['inventory list', '/inventory/?page=1&limit=10'],
+  ['inventory list', '/inventory?page=1&limit=10'],
   ['inventory detail', `/inventory/${ids.inventory}`],
   ['inventory by product', `/inventory/product/${ids.product}`],
   ['review detail', `/reviews/${ids.review}`],
   ['reviews by product', `/reviews/product/${ids.product}?page=1&limit=10`],
-  ['discounts list', '/discounts/?page=1&limit=10'],
+  ['discounts list', '/discounts?page=1&limit=10'],
   ['discounts detail', `/discounts/${ids.discount}`],
-  ['product discounts list', '/product-discounts/?page=1&limit=10'],
+  ['product discounts list', '/product-discounts?page=1&limit=10'],
   ['product discounts detail', `/product-discounts/${ids.productDiscount}`],
   ['product discounts by product', `/product-discounts/product/${ids.product}`],
-  ['vouchers list', '/vouchers/?page=1&limit=10'],
+  ['vouchers list', '/vouchers?page=1&limit=10'],
   ['vouchers detail', `/vouchers/${ids.voucher}`],
-  ['user vouchers list', '/user-vouchers/?page=1&limit=10'],
+  ['user vouchers list', '/user-vouchers?page=1&limit=10'],
   ['user vouchers detail', `/user-vouchers/${ids.userVoucher}`],
   ['user vouchers by voucher', `/user-vouchers/voucher/${ids.voucher}`],
 ];
@@ -131,7 +131,7 @@ await compare('inventory quantity update', `/inventory/${ids.inventory}`, 'PATCH
 await compare('inventory updated detail', `/inventory/${ids.inventory}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('category description update', `/categories/${ids.category}`, 'PATCH', { description: 'Updated cream category' });
 await compare('category updated detail', `/categories/${ids.category}`, 'GET', undefined, { ignoreUpdatedAt: true });
-await compare('category list stays cached after update', '/categories/?page=1&limit=10');
+await compare('category list stays cached after update', '/categories?page=1&limit=10');
 // Both backends reject unchanged PATCH values; error payload envelopes differ.
 await compare('category unchanged PATCH', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Cake' }, { statusOnly: true, expectError: true });
 await compare('product description update', `/products/${ids.product}`, 'PATCH', { description: 'Creamy vanilla updated' });

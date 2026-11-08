@@ -66,6 +66,20 @@ const { uploadUrl, key, headers } = presigned.data.data;
 assert.match(key, new RegExp(`^pending/products/${productId}/`));
 assert.equal(headers['Content-Type'], 'image/png');
 
+const preflight = await fetch(uploadUrl, {
+  method: 'OPTIONS',
+  headers: {
+    Origin: 'http://localhost:5173',
+    'Access-Control-Request-Method': 'PUT',
+    'Access-Control-Request-Headers': 'content-type',
+  },
+  signal: AbortSignal.timeout(15000),
+});
+assert.ok(preflight.ok, `MinIO preflight => ${preflight.status}`);
+assert.equal(preflight.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+assert.match(preflight.headers.get('access-control-allow-methods') ?? '', /\bPUT\b/i);
+console.log('PASS browser CORS preflight for presigned PUT');
+
 const put = await fetch(uploadUrl, {
   method: 'PUT', headers, body: png, signal: AbortSignal.timeout(15000),
 });

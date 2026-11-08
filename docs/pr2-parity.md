@@ -72,9 +72,11 @@ not considered equivalent unless called out below.
   test with a **real presigned HTTP PUT**, verify, immutable copy, GET and
   cleanup; it fails if `TEST_MINIO_ENDPOINT` is unavailable.
 - After differential checks, `scripts/parity/upload.mjs` exercises the full
-  authenticated Rust API flow: presign, browser-style PUT into MinIO, confirm,
-  public media GET and idempotent confirm retry.
+  authenticated Rust API flow: presign, browser CORS preflight, PUT into MinIO,
+  confirm, public media GET and idempotent confirm retry. The separate MinIO
+  deployment must explicitly allow the frontend origin via its own CORS setup
+  (for example `MINIO_API_CORS_ALLOW_ORIGIN`).
 - Running both test sets requires PostgreSQL, Redis, MinIO, Node.js, and Rust.
   Differential testing of the entire route/DTO edge-case matrix and
-  browser-specific CORS conditions is still **not complete**;
+  all browser-specific CORS and deployment conditions is still **not complete**;
   the current matrix is a reproducible parity gate, not 100% certification.
