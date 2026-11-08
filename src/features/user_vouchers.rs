@@ -7,7 +7,7 @@ use axum::{
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    QuerySelect,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -75,11 +75,7 @@ async fn create(
     }
     let claimed = parse_datetime(&b.claimed_at)?;
     let expired = parse_datetime(&b.expired_at)?;
-    if claimed > expired {
-        return Err(AppError::BadRequest(
-            "expiredAt must not precede claimedAt".into(),
-        ));
-    }
+    // The NestJS CreateUserVoucherDto does not require expiredAt >= claimedAt.
     let now = Utc::now().naive_utc();
     user_voucher::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -116,7 +112,6 @@ async fn list(
         return Err(not_found("User Voucher"));
     }
     let data = user_voucher::Entity::find()
-        .order_by_asc(user_voucher::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)

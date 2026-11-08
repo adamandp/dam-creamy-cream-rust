@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
-    entity::{inventory, order_item, product, product_information, role, user, user_voucher},
+    entity::{inventory, order_item, product, product_information, review, role, user, user_voucher},
     features::session,
     infrastructure::storage::Storage,
     state::AppState,
@@ -157,6 +157,15 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
         app.clone(),
         Method::POST,
         "/categories",
+        authorized,
+        Some(json!({"name":"Ice-Cream","description":"Creamy","isActive":true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST); // Nest baseName disallows punctuation.
+    let (status, _) = send(
+        app.clone(),
+        Method::POST,
+        "/categories",
         None,
         Some(json!({"name":"Ice Cream","description":"Creamy","isActive":true})),
     )
@@ -228,6 +237,31 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    // Nest ProductDiscountsService.findAll counts *users* rather than links.
+    // Introduce a second user so these totals cannot accidentally match.
+    let second_user_id = Uuid::new_v4();
+    user::ActiveModel {
+        id: Set(second_user_id),
+        role_id: Set(role_id),
+        username: Set("secondtester".into()),
+        email: Set(None),
+        phone_number: Set(None),
+        password: Set("password-placeholder".into()),
+        full_name: Set("Second Tester".into()),
+        birth_date: Set(None),
+        image_url: Set(None),
+        gender: Set(None),
+        is_active: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&db)
+    .await
+    .unwrap();
+    let (status, links) = send(app.clone(), Method::GET, "/product-discounts", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(links["data"].as_array().unwrap().len(), 1);
+    assert_eq!(links["paging"]["totalItems"], 2);
     let (status, catalog) = send(
         app.clone(),
         Method::GET,
@@ -274,6 +308,36 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    // A review on another product must affect the legacy *global* pagination
+    // count without appearing in the current product's filtered rows.
+    let other_product_id = Uuid::new_v4();
+    product::ActiveModel {
+        id: Set(other_product_id),
+        category_id: Set(cat.id),
+        discount_id: Set(None),
+        name: Set("Other Flavor".into()),
+        image_url: Set(None),
+        description: Set(None),
+        price: Set(1000.0),
+        is_active: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&db)
+    .await
+    .unwrap();
+    review::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(second_user_id),
+        product_id: Set(other_product_id),
+        rating: Set(4),
+        comment: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&db)
+    .await
+    .unwrap();
     let (status, reviews) = send(
         app.clone(),
         Method::GET,
@@ -284,6 +348,12 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(reviews["data"][0]["rate"], 5);
+    assert_eq!(reviews["data"].as_array().unwrap().len(), 1);
+    assert_eq!(reviews["paging"]["totalItems"], 2);
+    let (status, mine) = send(app.clone(), Method::GET, "/reviews/me", authorized, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(mine["data"].as_array().unwrap().len(), 1);
+    assert_eq!(mine["paging"]["totalItems"], 2);
     let inv = inventory::Entity::find().one(&db).await.unwrap().unwrap();
     let (status, _) = send(
         app.clone(),
@@ -293,7 +363,7 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
         Some(json!({"reservedQuantity":21})),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::OK); // Legacy inventory PATCH has no reserved <= quantity guard.
     let (status, _) = send(
         app.clone(),
         Method::PATCH,
@@ -337,7 +407,7 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let (status, body) = send(
-        app,
+        app.clone(),
         Method::GET,
         &format!("/user-vouchers/{}", uv.id),
         authorized,
@@ -346,6 +416,25 @@ async fn postgres_catalog_promotions_and_identity_interoperate() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["status"], "USED");
+    let (status, _) = send(
+        app.clone(),
+        Method::POST,
+        "/user-vouchers",
+        authorized,
+        Some(json!({"userId":user_id,"voucherId":voucher.id,"claimedAt":"2026-12-01T00:00:00Z","expiredAt":"2026-11-01T00:00:00Z"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    // The Nest DTOs allow negative promotion numbers and reversed date order.
+    let (status, _) = send(
+        app,
+        Method::POST,
+        "/discounts",
+        authorized,
+        Some(json!({"name":"Legacy Numbers","discountType":"FIXED","value":-10.0,"maxApplied":-1,"maxRedeemed":-1,"redeemedCount":2,"description":null,"productId":null,"quantity":-5,"startDate":"2027-01-01T00:00:00Z","endDate":"2026-01-01T00:00:00Z"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
     drop(db);
     admin_db
         .execute_raw(Statement::from_string(

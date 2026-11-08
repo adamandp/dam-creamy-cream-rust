@@ -7,7 +7,7 @@ use axum::{
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    QuerySelect,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -15,10 +15,10 @@ use uuid::Uuid;
 
 use super::{
     authorization,
-    catalog_common::{collection, detail, reject_no_change, require_text, timestamps},
+    catalog_common::{collection, detail, require_text, timestamps},
 };
 use crate::{
-    common::{Pagination, date_time, not_found, parse_uuid, success},
+    common::{Pagination, date_time, not_found, parse_uuid, require_changed_update, success},
     entity::{product, review, user},
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
@@ -119,7 +119,6 @@ async fn list(
         return Err(not_found("Review"));
     }
     let data = review::Entity::find()
-        .order_by_asc(review::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)
@@ -149,12 +148,12 @@ async fn by_me(
     let actor = authorization::authenticate(&s, &headers).await?;
     let (page, limit) = q.checked()?;
     let query = review::Entity::find().filter(review::Column::UserId.eq(actor.id));
-    let total = query.clone().count(&s.db).await.map_err(AppError::db)?;
+    // Legacy service paginates this user's reviews but counts ALL reviews.
+    let total = review::Entity::find().count(&s.db).await.map_err(AppError::db)?;
     if total == 0 {
         return Err(not_found("Review"));
     }
     let data = query
-        .order_by_asc(review::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)
@@ -184,12 +183,12 @@ async fn by_product(
     }
     let (page, limit) = q.checked()?;
     let query = review::Entity::find().filter(review::Column::ProductId.eq(id));
-    let total = query.clone().count(&s.db).await.map_err(AppError::db)?;
+    // Legacy service paginates this product's reviews but counts ALL reviews.
+    let total = review::Entity::find().count(&s.db).await.map_err(AppError::db)?;
     if total == 0 {
         return Err(not_found("Review"));
     }
     let rows = query
-        .order_by_asc(review::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)
@@ -227,9 +226,9 @@ async fn update(
             .map(|v| v.as_deref())
             .unwrap_or(m.comment.as_deref()),
     )?;
-    reject_no_change(&[
-        b.rating.map(|v| v == m.rating),
-        b.comment.as_ref().map(|v| v == &m.comment),
+    require_changed_update(&[
+        ("rating", b.rating.map(|v| v == m.rating)),
+        ("comment", b.comment.as_ref().map(|v| v == &m.comment)),
     ])?;
     let mut a: review::ActiveModel = m.into();
     if let Some(v) = b.rating {

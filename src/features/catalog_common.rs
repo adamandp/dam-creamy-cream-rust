@@ -35,6 +35,21 @@ pub fn require_text(value: &str, min: usize, max: usize, field: &str) -> AppResu
     }
 }
 
+// Nest's `baseName` uses /^[A-Za-z\s]+$/. Keep its letters/spaces
+// constraint while porting catalog DTOs, instead of accepting arbitrary text.
+pub fn require_name(value: &str, min: usize, max: usize, field: &str) -> AppResult<()> {
+    require_text(value, min, max, field)?;
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphabetic() || ch.is_whitespace())
+    {
+        return Err(AppError::BadRequest(format!(
+            "{field} must contain only letters and spaces"
+        )));
+    }
+    Ok(())
+}
+
 pub fn require_positive(value: f64, min: f64, max: f64, field: &str) -> AppResult<()> {
     if !value.is_finite() || !(min..=max).contains(&value) {
         Err(AppError::BadRequest(format!(

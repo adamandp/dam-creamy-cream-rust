@@ -7,17 +7,17 @@ use axum::{
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    QuerySelect,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
     authorization,
-    catalog_common::{collection, detail, reject_no_change, timestamps},
+    catalog_common::{collection, detail, timestamps},
 };
 use crate::{
-    common::{Pagination, not_found, parse_uuid, success},
+    common::{Pagination, not_found, parse_uuid, require_changed_update, success},
     entity::inventory,
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
@@ -57,7 +57,6 @@ async fn list(
         return Err(not_found("Inventory"));
     }
     let data = inventory::Entity::find()
-        .order_by_asc(inventory::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&state.db)
@@ -108,21 +107,20 @@ async fn update(
         .await
         .map_err(AppError::db)?
         .ok_or_else(|| not_found("Inventory"))?;
-    reject_no_change(&[
-        body.quantity.map(|v| v == m.quantity),
-        body.reserved_quantity.map(|v| v == m.reserved_quantity),
-        body.is_active.map(|v| v == m.is_active),
+    require_changed_update(&[
+        ("quantity", body.quantity.map(|v| v == m.quantity)),
+        ("reservedQuantity", body.reserved_quantity.map(|v| v == m.reserved_quantity)),
+        ("isActive", body.is_active.map(|v| v == m.is_active)),
     ])?;
-    let qty = body.quantity.unwrap_or(m.quantity);
-    let reserved = body.reserved_quantity.unwrap_or(m.reserved_quantity);
-    if qty < 0 || reserved < 0 || reserved > qty {
-        return Err(AppError::BadRequest(
-            "Inventory quantities must be nonnegative and reserved must not exceed quantity".into(),
-        ));
-    }
+    // Original InventoryService validates only that submitted fields changed;
+    // it does not enforce stock/reservation limits on PATCH.
     let mut a: inventory::ActiveModel = m.into();
-    a.quantity = Set(qty);
-    a.reserved_quantity = Set(reserved);
+    if let Some(v) = body.quantity {
+        a.quantity = Set(v);
+    }
+    if let Some(v) = body.reserved_quantity {
+        a.reserved_quantity = Set(v);
+    }
     if let Some(v) = body.is_active {
         a.is_active = Set(v);
     }

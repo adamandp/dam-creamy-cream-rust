@@ -7,7 +7,7 @@ use axum::{
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    QuerySelect,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ use super::{
 };
 use crate::{
     common::{Pagination, not_found, parse_uuid, success},
-    entity::{discount, product, product_discount},
+    entity::{discount, product, product_discount, user},
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
     state::AppState,
@@ -88,7 +88,9 @@ async fn list(
     ApiQuery(q): ApiQuery<Pagination>,
 ) -> AppResult<Json<Value>> {
     let (page, limit) = q.checked()?;
-    let total = product_discount::Entity::find()
+    // Nest's ProductDiscountsService.findAll counts users, not links.
+    // This is a known legacy pagination bug retained for 1:1 parity.
+    let total = user::Entity::find()
         .count(&s.db)
         .await
         .map_err(AppError::db)?;
@@ -96,7 +98,6 @@ async fn list(
         return Err(not_found("Product Discount"));
     }
     let data = product_discount::Entity::find()
-        .order_by_asc(product_discount::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)

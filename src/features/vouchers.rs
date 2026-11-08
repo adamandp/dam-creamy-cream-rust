@@ -5,22 +5,17 @@ use axum::{
     routing::get,
 };
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, QueryOrder, QuerySelect,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, QuerySelect};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::{
     authorization,
-    catalog_common::{
-        collection, detail, parse_datetime, reject_no_change, require_positive, require_text,
-        timestamps,
-    },
+    catalog_common::{collection, detail, parse_datetime, require_name, require_text, timestamps},
 };
 use crate::{
-    common::{Pagination, date_time, not_found, parse_uuid, success},
+    common::{Pagination, date_time, not_found, parse_uuid, require_changed_update, success},
     entity::{
         product,
         voucher::{self, VoucherGroup, VoucherType},
@@ -92,45 +87,22 @@ pub fn body(m: voucher::Model) -> Value {
     let (created_at, updated_at) = timestamps(m.created_at, m.updated_at);
     json!({"id":m.id,"code":m.code,"name":m.name,"description":m.description,"type":m.r#type,"group":m.group,"value":m.value,"productId":m.product_id,"quantity":m.quantity,"minimumPurchase":m.minimum_purchase,"isActive":m.is_active,"startDate":date_time(m.start_date),"endDate":date_time(m.end_date),"maxRedeemed":m.max_redeemed,"redeemedCount":m.redeemed_count,"createdAt":created_at,"updatedAt":updated_at})
 }
-struct VoucherRules<'a> {
-    code: &'a str,
-    name: &'a str,
-    description: Option<&'a str>,
+fn validate(
+    code: &str,
+    name: &str,
+    description: Option<&str>,
     value: Option<f64>,
     minimum: f64,
-    quantity: Option<i32>,
-    max: i32,
-    redeemed: i32,
-    start: chrono::NaiveDateTime,
-    end: chrono::NaiveDateTime,
-}
-
-fn validate(rules: VoucherRules<'_>) -> AppResult<()> {
-    let VoucherRules {
-        code,
-        name,
-        description,
-        value,
-        minimum,
-        quantity,
-        max,
-        redeemed,
-        start,
-        end,
-    } = rules;
+) -> AppResult<()> {
     require_text(code, 1, 50, "code")?;
-    require_text(name, 1, 50, "name")?;
+    require_name(name, 1, 50, "name")?;
     if let Some(v) = description {
         require_text(v, 1, 255, "description")?;
     }
-    if let Some(v) = value {
-        require_positive(v, 0.0, 1_000_000_000.0, "value")?;
-    }
-    require_positive(minimum, 0.0, 1_000_000_000.0, "minimumPurchase")?;
-    if max < 0 || redeemed < 0 || redeemed > max || quantity.is_some_and(|q| q < 0) || start > end {
-        return Err(AppError::BadRequest(
-            "Invalid voucher limits, quantity or date interval".into(),
-        ));
+    // Legacy Zod DTO checks number types, but no range, stock, redemption,
+    // or date-interval business rules here.
+    if value.is_some_and(|v| !v.is_finite()) || !minimum.is_finite() {
+        return Err(AppError::BadRequest("Invalid voucher value".into()));
     }
     Ok(())
 }
@@ -144,18 +116,7 @@ async fn create(
         .require_admin()?;
     let start = parse_datetime(&b.start_date)?;
     let end = parse_datetime(&b.end_date)?;
-    validate(VoucherRules {
-        code: &b.code,
-        name: &b.name,
-        description: b.description.as_deref(),
-        value: b.value,
-        minimum: b.minimum_purchase,
-        quantity: b.quantity,
-        max: b.max_redeemed,
-        redeemed: b.redeemed_count,
-        start,
-        end,
-    })?;
+    validate(&b.code, &b.name, b.description.as_deref(), b.value, b.minimum_purchase)?;
     if let Some(id) = b.product_id
         && product::Entity::find_by_id(id)
             .one(&s.db)
@@ -203,7 +164,6 @@ async fn list(
         return Err(not_found("Voucher"));
     }
     let data = voucher::Entity::find()
-        .order_by_asc(voucher::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)
@@ -251,22 +211,13 @@ async fn update(
         .map(parse_datetime)
         .transpose()?
         .unwrap_or(m.end_date);
-    validate(VoucherRules {
-        code: b.code.as_deref().unwrap_or(&m.code),
-        name: b.name.as_deref().unwrap_or(&m.name),
-        description: b
-            .description
-            .as_ref()
-            .map(|v| v.as_deref())
-            .unwrap_or(m.description.as_deref()),
-        value: b.value.unwrap_or(m.value),
-        minimum: b.minimum_purchase.unwrap_or(m.minimum_purchase),
-        quantity: b.quantity.unwrap_or(m.quantity),
-        max: b.max_redeemed.unwrap_or(m.max_redeemed),
-        redeemed: b.redeemed_count.unwrap_or(m.redeemed_count),
-        start,
-        end,
-    })?;
+    validate(
+        b.code.as_deref().unwrap_or(&m.code),
+        b.name.as_deref().unwrap_or(&m.name),
+        b.description.as_ref().map(|v| v.as_deref()).unwrap_or(m.description.as_deref()),
+        b.value.unwrap_or(m.value),
+        b.minimum_purchase.unwrap_or(m.minimum_purchase),
+    )?;
     if let Some(Some(id)) = b.product_id
         && product::Entity::find_by_id(id)
             .one(&s.db)
@@ -276,21 +227,21 @@ async fn update(
     {
         return Err(not_found("Product"));
     }
-    reject_no_change(&[
-        b.code.as_ref().map(|v| v == &m.code),
-        b.name.as_ref().map(|v| v == &m.name),
-        b.description.as_ref().map(|v| v == &m.description),
-        b.r#type.as_ref().map(|v| v == &m.r#type),
-        b.group.as_ref().map(|v| v == &m.group),
-        b.value.as_ref().map(|v| v == &m.value),
-        b.product_id.as_ref().map(|v| v == &m.product_id),
-        b.quantity.as_ref().map(|v| v == &m.quantity),
-        b.minimum_purchase.map(|v| v == m.minimum_purchase),
-        b.is_active.map(|v| v == m.is_active),
-        b.start_date.as_ref().map(|_| start == m.start_date),
-        b.end_date.as_ref().map(|_| end == m.end_date),
-        b.max_redeemed.map(|v| v == m.max_redeemed),
-        b.redeemed_count.map(|v| v == m.redeemed_count),
+    require_changed_update(&[
+        ("code", b.code.as_ref().map(|v| v == &m.code)),
+        ("name", b.name.as_ref().map(|v| v == &m.name)),
+        ("description", b.description.as_ref().map(|v| v == &m.description)),
+        ("type", b.r#type.as_ref().map(|v| v == &m.r#type)),
+        ("group", b.group.as_ref().map(|v| v == &m.group)),
+        ("value", b.value.as_ref().map(|v| v == &m.value)),
+        ("productId", b.product_id.as_ref().map(|v| v == &m.product_id)),
+        ("quantity", b.quantity.as_ref().map(|v| v == &m.quantity)),
+        ("minimumPurchase", b.minimum_purchase.map(|v| v == m.minimum_purchase)),
+        ("isActive", b.is_active.map(|v| v == m.is_active)),
+        ("startDate", b.start_date.as_ref().map(|_| start == m.start_date)),
+        ("endDate", b.end_date.as_ref().map(|_| end == m.end_date)),
+        ("maxRedeemed", b.max_redeemed.map(|v| v == m.max_redeemed)),
+        ("redeemedCount", b.redeemed_count.map(|v| v == m.redeemed_count)),
     ])?;
     let mut a: voucher::ActiveModel = m.into();
     if let Some(v) = b.code {

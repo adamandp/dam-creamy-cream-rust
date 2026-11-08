@@ -17,10 +17,10 @@ use uuid::Uuid;
 
 use super::{
     authorization,
-    catalog_common::{collection, reject_no_change, require_positive, require_text, timestamps},
+    catalog_common::{collection, require_positive, require_text, timestamps},
 };
 use crate::{
-    common::{Pagination, not_found, parse_uuid, success},
+    common::{Pagination, not_found, parse_uuid, require_changed_update, success},
     entity::{
         category,
         discount::{self, DiscountType},
@@ -216,7 +216,6 @@ async fn list(
         return Err(not_found("Product"));
     }
     let data = product::Entity::find()
-        .order_by_asc(product::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)
@@ -343,13 +342,13 @@ async fn update(
     {
         return Err(not_found("category"));
     }
-    reject_no_change(&[
-        b.category_id.map(|v| v == m.category_id),
-        b.discount_id.as_ref().map(|v| v == &m.discount_id),
-        b.name.as_ref().map(|v| v == &m.name),
-        b.description.as_ref().map(|v| v == &m.description),
-        b.price.map(|v| v == m.price),
-        b.is_active.map(|v| v == m.is_active),
+    require_changed_update(&[
+        ("categoryId", b.category_id.map(|v| v == m.category_id)),
+        ("discountId", b.discount_id.as_ref().map(|v| v == &m.discount_id)),
+        ("name", b.name.as_ref().map(|v| v == &m.name)),
+        ("description", b.description.as_ref().map(|v| v == &m.description)),
+        ("price", b.price.map(|v| v == m.price)),
+        ("isActive", b.is_active.map(|v| v == m.is_active)),
     ])?;
     let mut a: product::ActiveModel = m.into();
     if let Some(v) = b.category_id {

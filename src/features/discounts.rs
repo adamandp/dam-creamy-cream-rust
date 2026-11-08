@@ -5,22 +5,17 @@ use axum::{
     routing::get,
 };
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, QueryOrder, QuerySelect,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, QuerySelect};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::{
     authorization,
-    catalog_common::{
-        collection, detail, parse_datetime, reject_no_change, require_positive, require_text,
-        timestamps,
-    },
+    catalog_common::{collection, detail, parse_datetime, require_name, require_text, timestamps},
 };
 use crate::{
-    common::{Pagination, date_time, not_found, parse_uuid, success},
+    common::{Pagination, date_time, not_found, parse_uuid, require_changed_update, success},
     entity::discount::{self, DiscountType},
     error::{AppError, AppResult},
     extract::{ApiJson, ApiQuery},
@@ -86,42 +81,12 @@ pub fn body(m: discount::Model) -> Value {
     json!({"id":m.id,"name":m.name,"discountType":m.discount_type,"value":m.value,"maxApplied":m.max_applied,"maxRedeemed":m.max_redeemed,"redeemedCount":m.redeemed_count,"description":m.description,"productId":m.product_id,"quantity":m.quantity,"startDate":date_time(m.start_date),"endDate":date_time(m.end_date),"createdAt":created_at,"updatedAt":updated_at})
 }
 
-struct DiscountRules<'a> {
-    name: &'a str,
-    value: Option<f64>,
-    max_applied: i32,
-    max_redeemed: i32,
-    redeemed_count: i32,
-    quantity: Option<i32>,
-    start: chrono::NaiveDateTime,
-    end: chrono::NaiveDateTime,
-}
-
-fn validate(rules: DiscountRules<'_>) -> AppResult<()> {
-    let DiscountRules {
-        name,
-        value,
-        max_applied,
-        max_redeemed,
-        redeemed_count,
-        quantity,
-        start,
-        end,
-    } = rules;
-    require_text(name, 1, 50, "name")?;
-    if let Some(value) = value {
-        require_positive(value, 0.0, 1_000_000_000.0, "value")?;
-    }
-    if max_applied < 0
-        || max_redeemed < 0
-        || redeemed_count < 0
-        || redeemed_count > max_redeemed
-        || quantity.is_some_and(|q| q < 0)
-        || start > end
-    {
-        return Err(AppError::BadRequest(
-            "Invalid discount limits, quantity or date interval".into(),
-        ));
+fn validate(name: &str, value: Option<f64>) -> AppResult<()> {
+    require_name(name, 1, 50, "name")?;
+    // Nest's DTO only checks numeric type; no nonnegative limits, redeemed
+    // cap, or start/end ordering is enforced on these fields.
+    if value.is_some_and(|v| !v.is_finite()) {
+        return Err(AppError::BadRequest("Invalid value".into()));
     }
     Ok(())
 }
@@ -136,16 +101,7 @@ async fn create(
         .require_admin()?;
     let start = parse_datetime(&b.start_date)?;
     let end = parse_datetime(&b.end_date)?;
-    validate(DiscountRules {
-        name: &b.name,
-        value: b.value,
-        max_applied: b.max_applied,
-        max_redeemed: b.max_redeemed,
-        redeemed_count: b.redeemed_count,
-        quantity: b.quantity,
-        start,
-        end,
-    })?;
+    validate(&b.name, b.value)?;
     if let Some(d) = &b.description {
         require_text(d, 1, 255, "description")?;
     }
@@ -186,7 +142,6 @@ async fn list(
         return Err(not_found("Users"));
     }
     let data = discount::Entity::find()
-        .order_by_asc(discount::Column::CreatedAt)
         .offset((page - 1) * limit)
         .limit(limit)
         .all(&s.db)
@@ -236,31 +191,22 @@ async fn update(
         .map(parse_datetime)
         .transpose()?
         .unwrap_or(m.end_date);
-    validate(DiscountRules {
-        name: b.name.as_deref().unwrap_or(&m.name),
-        value: b.value.unwrap_or(m.value),
-        max_applied: b.max_applied.unwrap_or(m.max_applied),
-        max_redeemed: b.max_redeemed.unwrap_or(m.max_redeemed),
-        redeemed_count: b.redeemed_count.unwrap_or(m.redeemed_count),
-        quantity: b.quantity.unwrap_or(m.quantity),
-        start,
-        end,
-    })?;
+    validate(b.name.as_deref().unwrap_or(&m.name), b.value.unwrap_or(m.value))?;
     if let Some(Some(d)) = &b.description {
         require_text(d, 1, 255, "description")?;
     }
-    reject_no_change(&[
-        b.name.as_ref().map(|v| v == &m.name),
-        b.discount_type.as_ref().map(|v| v == &m.discount_type),
-        b.value.as_ref().map(|v| v == &m.value),
-        b.max_applied.map(|v| v == m.max_applied),
-        b.max_redeemed.map(|v| v == m.max_redeemed),
-        b.redeemed_count.map(|v| v == m.redeemed_count),
-        b.description.as_ref().map(|v| v == &m.description),
-        b.product_id.as_ref().map(|v| v == &m.product_id),
-        b.quantity.as_ref().map(|v| v == &m.quantity),
-        b.start_date.as_ref().map(|_| start == m.start_date),
-        b.end_date.as_ref().map(|_| end == m.end_date),
+    require_changed_update(&[
+        ("name", b.name.as_ref().map(|v| v == &m.name)),
+        ("discountType", b.discount_type.as_ref().map(|v| v == &m.discount_type)),
+        ("value", b.value.as_ref().map(|v| v == &m.value)),
+        ("maxApplied", b.max_applied.map(|v| v == m.max_applied)),
+        ("maxRedeemed", b.max_redeemed.map(|v| v == m.max_redeemed)),
+        ("redeemedCount", b.redeemed_count.map(|v| v == m.redeemed_count)),
+        ("description", b.description.as_ref().map(|v| v == &m.description)),
+        ("productId", b.product_id.as_ref().map(|v| v == &m.product_id)),
+        ("quantity", b.quantity.as_ref().map(|v| v == &m.quantity)),
+        ("startDate", b.start_date.as_ref().map(|_| start == m.start_date)),
+        ("endDate", b.end_date.as_ref().map(|_| end == m.end_date)),
     ])?;
     let mut a: discount::ActiveModel = m.into();
     if let Some(v) = b.name {
