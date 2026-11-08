@@ -127,20 +127,18 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-async fn cost(ApiJson(req): ApiJson<CostInput>) -> AppResult<(StatusCode, Json<Value>)> {
+async fn fetch_quote(base_url: &str, api_key: &str, req: &CostInput) -> AppResult<Value> {
     let failure = || {
         AppError::ExternalService(
             "❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into(),
         )
     };
-    let url = std::env::var("RAJAONGKIR_BASE_URL").map_err(|_| failure())?;
-    let key = std::env::var("RAJAONGKIR_API_KEY").map_err(|_| failure())?;
     let response = client()
         .post(format!(
             "{}/calculate/domestic-cost",
-            url.trim_end_matches('/')
+            base_url.trim_end_matches('/')
         ))
-        .header("key", key)
+        .header("key", api_key)
         .form(&[
             ("origin", req.origin.to_string()),
             ("destination", req.destination.to_string()),
@@ -161,17 +159,33 @@ async fn cost(ApiJson(req): ApiJson<CostInput>) -> AppResult<(StatusCode, Json<V
         tracing::error!(error=%e,"Invalid RajaOngkir response");
         failure()
     })?;
+    let meta = payload.get("meta").ok_or_else(failure)?;
+    let message = meta.get("message").ok_or_else(failure)?;
+    let status = meta.get("code").ok_or_else(failure)?;
+    let data = payload.get("data").ok_or_else(failure)?;
+    Ok(json!({"message":message,"status":status,"data":data}))
+}
+
+async fn cost(ApiJson(req): ApiJson<CostInput>) -> AppResult<(StatusCode, Json<Value>)> {
+    let failure = || {
+        AppError::ExternalService(
+            "❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into(),
+        )
+    };
+    let url = std::env::var("RAJAONGKIR_BASE_URL").map_err(|_| failure())?;
+    let key = std::env::var("RAJAONGKIR_API_KEY").map_err(|_| failure())?;
     Ok((
         StatusCode::CREATED,
-        Json(
-            json!({"message":payload["meta"]["message"],"status":payload["meta"]["code"],"data":payload["data"]}),
-        ),
+        Json(fetch_quote(&url, &key, &req).await?),
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{extract::Form, http::HeaderMap};
+    use std::collections::HashMap;
+
     #[test]
     fn cost_dto_matches_zod_coercion_and_strictness() {
         let dto: CostInput =
@@ -183,5 +197,44 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn quote_sends_form_data_and_maps_success_response() {
+        async fn mocked_provider(
+            headers: HeaderMap,
+            Form(fields): Form<HashMap<String, String>>,
+        ) -> Json<Value> {
+            assert_eq!(headers["key"], "test-rajaongkir-key");
+            assert_eq!(fields["origin"], "12");
+            assert_eq!(fields["destination"], "34");
+            assert_eq!(fields["weight"], "1000");
+            assert_eq!(fields["courier"], COURIERS);
+            Json(json!({"meta":{"message":"success","code":200},"data":[{"service":"REG"}]}))
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route("/calculate/domestic-cost", post(mocked_provider)),
+            )
+            .await
+            .unwrap();
+        });
+        let input = CostInput {
+            origin: 12.0,
+            destination: 34.0,
+            weight: 1000.0,
+        };
+        let result = fetch_quote(&base_url, "test-rajaongkir-key", &input)
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            json!({"message":"success","status":200,"data":[{"service":"REG"}]})
+        );
+        server.abort();
     }
 }
