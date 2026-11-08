@@ -18,7 +18,14 @@ fn js_number(s: &str) -> String {
     if text.is_empty() {
         return "0".into();
     }
-    let radix = [("0x", 16), ("0X", 16), ("0b", 2), ("0B", 2), ("0o", 8), ("0O", 8)];
+    let radix = [
+        ("0x", 16),
+        ("0X", 16),
+        ("0b", 2),
+        ("0B", 2),
+        ("0o", 8),
+        ("0O", 8),
+    ];
     for (prefix, base) in radix {
         if let Some(digits) = text.strip_prefix(prefix) {
             return u64::from_str_radix(digits, base)
