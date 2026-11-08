@@ -1,35 +1,48 @@
 use std::sync::OnceLock;
 
-use axum::{Json, Router, extract::{Path, State}, http::{HeaderMap,StatusCode}, routing::{get, post}};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
+    routing::{get, post},
+};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait, QuerySelect};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{authorization, catalog_common::{collection, detail}};
+use super::{
+    authorization,
+    catalog_common::{collection, detail},
+};
 use crate::{
-    common::{Pagination, date_time, parse_uuid, plain_not_found, not_found, success},
+    common::{Pagination, date_time, not_found, parse_uuid, plain_not_found, success},
     entity::shipment::{self, ShipmentStatus},
-    error::{AppError, AppResult}, extract::{ApiJson, ApiQuery}, state::AppState,
+    error::{AppError, AppResult},
+    extract::{ApiJson, ApiQuery},
+    state::AppState,
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all="camelCase")]
-pub struct UpdateStatus { status: ShipmentStatus }
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStatus {
+    status: ShipmentStatus,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CostInput {
-    #[serde(deserialize_with="crate::common::coerce_js_number")]
+    #[serde(deserialize_with = "crate::common::coerce_js_number")]
     origin: f64,
-    #[serde(deserialize_with="crate::common::coerce_js_number")]
+    #[serde(deserialize_with = "crate::common::coerce_js_number")]
     destination: f64,
-    #[serde(deserialize_with="crate::common::coerce_js_number")]
+    #[serde(deserialize_with = "crate::common::coerce_js_number")]
     weight: f64,
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/", get(list))
+    Router::new()
+        .route("/", get(list))
         .route("/cost", post(cost))
         .route("/{id}", get(one))
         .route("/{id}/status", axum::routing::patch(update_status))
@@ -43,49 +56,117 @@ fn body(m: shipment::Model) -> Value {
         "createdAt":date_time(m.created_at),"updatedAt":date_time(m.updated_at)})
 }
 
-async fn list(State(s): State<AppState>, ApiQuery(q): ApiQuery<Pagination>) -> AppResult<Json<Value>> {
-    let (page,limit)=q.checked()?;
-    let total = shipment::Entity::find().count(&s.db).await.map_err(AppError::db)?;
-    if total==0 { return Err(plain_not_found("Shipment")); }
-    let records = shipment::Entity::find().offset((page-1)*limit).limit(limit).all(&s.db).await.map_err(AppError::db)?;
-    Ok(Json(collection("Shipment",records.into_iter().map(body).collect(),page,limit,total)))
+async fn list(
+    State(s): State<AppState>,
+    ApiQuery(q): ApiQuery<Pagination>,
+) -> AppResult<Json<Value>> {
+    let (page, limit) = q.checked()?;
+    let total = shipment::Entity::find()
+        .count(&s.db)
+        .await
+        .map_err(AppError::db)?;
+    if total == 0 {
+        return Err(plain_not_found("Shipment"));
+    }
+    let records = shipment::Entity::find()
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all(&s.db)
+        .await
+        .map_err(AppError::db)?;
+    Ok(Json(collection(
+        "Shipment",
+        records.into_iter().map(body).collect(),
+        page,
+        limit,
+        total,
+    )))
 }
 
 async fn one(State(s): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
-    let m=shipment::Entity::find_by_id(parse_uuid(&id)?).one(&s.db).await.map_err(AppError::db)?.ok_or_else(||not_found("Shipment"))?;
-    Ok(Json(detail("Shipment",body(m))))
+    let m = shipment::Entity::find_by_id(parse_uuid(&id)?)
+        .one(&s.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Shipment"))?;
+    Ok(Json(detail("Shipment", body(m))))
 }
 
-async fn update_status(State(s): State<AppState>, Path(id): Path<String>,
-    headers:HeaderMap, ApiJson(req):ApiJson<UpdateStatus>) -> AppResult<Json<Value>> {
-    authorization::authenticate(&s,&headers).await?.require_admin()?;
-    let m=shipment::Entity::find_by_id(parse_uuid(&id)?).one(&s.db).await.map_err(AppError::db)?.ok_or_else(||not_found("Shipment"))?;
-    let mut row:shipment::ActiveModel=m.into();
-    row.status=Set(req.status); row.updated_at=Set(Utc::now().naive_utc());
+async fn update_status(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    ApiJson(req): ApiJson<UpdateStatus>,
+) -> AppResult<Json<Value>> {
+    authorization::authenticate(&s, &headers)
+        .await?
+        .require_admin()?;
+    let m = shipment::Entity::find_by_id(parse_uuid(&id)?)
+        .one(&s.db)
+        .await
+        .map_err(AppError::db)?
+        .ok_or_else(|| not_found("Shipment"))?;
+    let mut row: shipment::ActiveModel = m.into();
+    row.status = Set(req.status);
+    row.updated_at = Set(Utc::now().naive_utc());
     row.update(&s.db).await.map_err(AppError::db)?;
-    Ok(Json(success("updated","Shipment")))
+    Ok(Json(success("updated", "Shipment")))
 }
 
-const COURIERS:&str="jne:sicepat:ide:sap:jnt:ninja:tiki:lion:anteraja:pos:ncs:rex:rpx:sentral:star:wahana:dse";
+const COURIERS: &str =
+    "jne:sicepat:ide:sap:jnt:ninja:tiki:lion:anteraja:pos:ncs:rex:rpx:sentral:star:wahana:dse";
 
 // Single client, not one TCP/TLS pool per shipping-price request.
 fn client() -> &'static reqwest::Client {
-    static CLIENT:OnceLock<reqwest::Client>=OnceLock::new();
-    CLIENT.get_or_init(||reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().expect("valid HTTP client"))
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("valid HTTP client")
+    })
 }
 
-async fn cost(ApiJson(req):ApiJson<CostInput>) -> AppResult<(StatusCode,Json<Value>)> {
-    let failure = ||AppError::ExternalService("❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into());
-    let url=std::env::var("RAJAONGKIR_BASE_URL").map_err(|_|failure())?;
-    let key=std::env::var("RAJAONGKIR_API_KEY").map_err(|_|failure())?;
-    let response = client().post(format!("{}/calculate/domestic-cost",url.trim_end_matches('/')))
-        .header("key",key)
-        .form(&[("origin",req.origin.to_string()),("destination",req.destination.to_string()),
-            ("weight",req.weight.to_string()),("courier",COURIERS.to_owned())])
-        .send().await.map_err(|e|{tracing::error!(error=%e,"RajaOngkir request failed");failure()})?;
-    let response=response.error_for_status().map_err(|e|{tracing::error!(error=%e,"RajaOngkir rejected request");failure()})?;
-    let payload:Value=response.json().await.map_err(|e|{tracing::error!(error=%e,"Invalid RajaOngkir response");failure()})?;
-    Ok((StatusCode::CREATED,Json(json!({"message":payload["meta"]["message"],"status":payload["meta"]["code"],"data":payload["data"]}))))
+async fn cost(ApiJson(req): ApiJson<CostInput>) -> AppResult<(StatusCode, Json<Value>)> {
+    let failure = || {
+        AppError::ExternalService(
+            "❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into(),
+        )
+    };
+    let url = std::env::var("RAJAONGKIR_BASE_URL").map_err(|_| failure())?;
+    let key = std::env::var("RAJAONGKIR_API_KEY").map_err(|_| failure())?;
+    let response = client()
+        .post(format!(
+            "{}/calculate/domestic-cost",
+            url.trim_end_matches('/')
+        ))
+        .header("key", key)
+        .form(&[
+            ("origin", req.origin.to_string()),
+            ("destination", req.destination.to_string()),
+            ("weight", req.weight.to_string()),
+            ("courier", COURIERS.to_owned()),
+        ])
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!(error=%e,"RajaOngkir request failed");
+            failure()
+        })?;
+    let response = response.error_for_status().map_err(|e| {
+        tracing::error!(error=%e,"RajaOngkir rejected request");
+        failure()
+    })?;
+    let payload: Value = response.json().await.map_err(|e| {
+        tracing::error!(error=%e,"Invalid RajaOngkir response");
+        failure()
+    })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            json!({"message":payload["meta"]["message"],"status":payload["meta"]["code"],"data":payload["data"]}),
+        ),
+    ))
 }
 
 #[cfg(test)]
@@ -93,8 +174,14 @@ mod tests {
     use super::*;
     #[test]
     fn cost_dto_matches_zod_coercion_and_strictness() {
-        let dto:CostInput=serde_json::from_value(json!({"origin":"1","destination":20,"weight":true})).unwrap();
-        assert_eq!((dto.origin,dto.destination,dto.weight),(1.0,20.0,1.0));
-        assert!(serde_json::from_value::<CostInput>(json!({"origin":1,"destination":2,"weight":100,"extra":5})).is_err());
+        let dto: CostInput =
+            serde_json::from_value(json!({"origin":"1","destination":20,"weight":true})).unwrap();
+        assert_eq!((dto.origin, dto.destination, dto.weight), (1.0, 20.0, 1.0));
+        assert!(
+            serde_json::from_value::<CostInput>(
+                json!({"origin":1,"destination":2,"weight":100,"extra":5})
+            )
+            .is_err()
+        );
     }
 }

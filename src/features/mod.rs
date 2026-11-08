@@ -1,7 +1,7 @@
 pub mod addresses;
 pub mod auth;
-pub mod carts;
 pub mod authorization;
+pub mod carts;
 pub mod catalog_common;
 pub mod categories;
 pub mod discounts;

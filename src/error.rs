@@ -75,7 +75,11 @@ impl IntoResponse for AppError {
                     "Internal server error".to_owned(),
                 )
             }
-            Self::ExternalService(s) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error", s),
+            Self::ExternalService(s) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                s,
+            ),
         };
         (
             status,
