@@ -168,6 +168,7 @@ await compare('user voucher after used', `/user-vouchers/${ids.userVoucher}`, 'G
 // vary by database, so we verify follow-up state independently later.
 const expectError = { statusOnly: true, expectError: true };
 const statusOnly = { statusOnly: true };
+await compare('catalog strict query rejects unknown keys', '/products/catalog?unexpected=x', 'GET', undefined, expectError);
 const discountCreate = {
   name: 'Cream Sale', discountType: 'FIXED', value: null,
   maxApplied: 1, maxRedeemed: 10, redeemedCount: 0,
@@ -189,6 +190,8 @@ const addressCreate = {
 await compare('category missing required nullable description', '/categories', 'POST', { name: 'Cream Category', isActive: true }, expectError);
 await compare('category unknown field stripped', '/categories', 'POST', { name: 'Cream New', description: null, isActive: true, discardedField: 123 }, statusOnly);
 await compare('category description null allowed', '/categories', 'POST', { name: 'Cream Nullable', description: null, isActive: false }, statusOnly);
+await compare('category PATCH strips unknown keys', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Catalogue', ignored: 123 });
+await compare('category detail after unknown-key PATCH', `/categories/${ids.category}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('product missing required nullable description', '/products', 'POST', { categoryId: ids.category, name: 'Cream Product', price: 12000, isActive: true }, expectError);
 await compare('product strictly rejects unknown fields', '/products', 'POST', { categoryId: ids.category, name: 'Cream Product', description: null, price: 12000, isActive: true, extra: true }, expectError);
 for (const field of ['value', 'description', 'productId', 'quantity']) {
@@ -200,12 +203,16 @@ await compare('discount strips unknown and accepts explicit nulls', '/discounts'
 await compare('discount accepts date-only strings like Zod', '/discounts', 'POST', {
   ...discountCreate, name: 'Cream Date Sale', startDate: '2026-11-08', endDate: '2026-12-08',
 }, statusOnly);
+await compare('discount PATCH strips unknown keys', `/discounts/${ids.discount}`, 'PATCH', { description: 'Cream discount extra', ignored: 7 });
+await compare('discount after unknown-key PATCH', `/discounts/${ids.discount}`, 'GET', undefined, { ignoreUpdatedAt: true });
 for (const field of ['value', 'description', 'productId', 'quantity']) {
   const invalid = { ...voucherCreate };
   delete invalid[field];
   await compare(`voucher missing nullable ${field}`, '/vouchers', 'POST', invalid, expectError);
 }
 await compare('voucher strips unknown and accepts explicit nulls', '/vouchers', 'POST', { ...voucherCreate, ignored: 'okay' }, statusOnly);
+await compare('voucher PATCH strips unknown keys', `/vouchers/${ids.voucher}`, 'PATCH', { description: 'Cream voucher extra', ignored: 7 });
+await compare('voucher after unknown-key PATCH', `/vouchers/${ids.voucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('review strips unknown fields', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 4, comment: null, unknown: 'ignored' }, statusOnly);
 await compare('review invalid rating', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 6 }, expectError);
 await compare('product-discount missing discountId', '/product-discounts', 'POST', { productId: ids.product }, expectError);

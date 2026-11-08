@@ -32,17 +32,29 @@ fn dto_shape_matches_nest_zod_strict_nullable_and_coercion() {
     let category = json!({"name":"Cream Cake","description":null,"isActive":true,"ignoredByZod":4});
     assert!(serde_json::from_value::<categories::Create>(category.clone()).is_ok());
     let mut missing_category_description = category;
-    missing_category_description.as_object_mut().unwrap().remove("description");
+    missing_category_description
+        .as_object_mut()
+        .unwrap()
+        .remove("description");
     assert!(serde_json::from_value::<categories::Create>(missing_category_description).is_err());
-    assert!(serde_json::from_value::<categories::Update>(json!({"unused":"ignored","name":"Cream"})).is_ok());
+    assert!(
+        serde_json::from_value::<categories::Update>(json!({"unused":"ignored","name":"Cream"}))
+            .is_ok()
+    );
 
     let product = json!({"categoryId":Uuid::new_v4(),"discountId":null,"name":"Cream","description":null,"price":1100.0,"isActive":true});
     assert!(serde_json::from_value::<products::Create>(product.clone()).is_ok());
     let mut missing_product_description = product.clone();
-    missing_product_description.as_object_mut().unwrap().remove("description");
+    missing_product_description
+        .as_object_mut()
+        .unwrap()
+        .remove("description");
     assert!(serde_json::from_value::<products::Create>(missing_product_description).is_err());
     let mut extra_product_field = product;
-    extra_product_field.as_object_mut().unwrap().insert("extra".into(), json!(true));
+    extra_product_field
+        .as_object_mut()
+        .unwrap()
+        .insert("extra".into(), json!(true));
     assert!(serde_json::from_value::<products::Create>(extra_product_field).is_err());
 
     let discount = json!({"name":"Cream Sale","discountType":"FIXED","value":null,"maxApplied":1,"maxRedeemed":10,"redeemedCount":0,"description":null,"productId":null,"quantity":null,"startDate":"2026-11-08T00:00:00Z","endDate":"2026-12-08T00:00:00Z","ignoredByZod":"okay"});
@@ -50,7 +62,10 @@ fn dto_shape_matches_nest_zod_strict_nullable_and_coercion() {
     for required in ["value", "description", "productId", "quantity"] {
         let mut missing = discount.clone();
         missing.as_object_mut().unwrap().remove(required);
-        assert!(serde_json::from_value::<discounts::Create>(missing).is_err(), "missing {required} must be rejected");
+        assert!(
+            serde_json::from_value::<discounts::Create>(missing).is_err(),
+            "missing {required} must be rejected"
+        );
     }
 
     let voucher = json!({"code":"CREAM10","name":"Cream Sale","description":null,"type":"FIXED","group":"CHECKOUT","value":null,"productId":null,"quantity":null,"minimumPurchase":1000.0,"isActive":true,"startDate":"2026-11-08T00:00:00Z","endDate":"2026-12-08T00:00:00Z","maxRedeemed":10,"redeemedCount":0,"unknown":true});
@@ -58,20 +73,37 @@ fn dto_shape_matches_nest_zod_strict_nullable_and_coercion() {
     for required in ["description", "value", "productId", "quantity"] {
         let mut missing = voucher.clone();
         missing.as_object_mut().unwrap().remove(required);
-        assert!(serde_json::from_value::<vouchers::Create>(missing).is_err(), "missing {required} must be rejected");
+        assert!(
+            serde_json::from_value::<vouchers::Create>(missing).is_err(),
+            "missing {required} must be rejected"
+        );
     }
 
-    assert!(serde_json::from_value::<reviews::Create>(json!({"userId":Uuid::new_v4(),"productId":Uuid::new_v4(),"rating":4,"unknown":true})).is_ok());
-    assert!(serde_json::from_value::<product_discounts::Create>(json!({"productId":Uuid::new_v4(),"discountId":Uuid::new_v4(),"unknown":true})).is_ok());
+    assert!(
+        serde_json::from_value::<reviews::Create>(
+            json!({"userId":Uuid::new_v4(),"productId":Uuid::new_v4(),"rating":4,"unknown":true})
+        )
+        .is_ok()
+    );
+    assert!(
+        serde_json::from_value::<product_discounts::Create>(
+            json!({"productId":Uuid::new_v4(),"discountId":Uuid::new_v4(),"unknown":true})
+        )
+        .is_ok()
+    );
     assert!(serde_json::from_value::<user_vouchers::Create>(json!({"userId":Uuid::new_v4(),"voucherId":Uuid::new_v4(),"claimedAt":"2026-11-08T00:00:00Z","expiredAt":"2026-12-08T00:00:00Z","unknown":true})).is_ok());
 
     let address = json!({"userId":Uuid::new_v4(),"recipientName":"Adam","recipientPhoneNumber":"081234567890","province":"Jawa Barat","city":"Bandung","subdistrict":"Andir","village":"Ciroyom","postalCode":"40182","address":"Jl Cream","isPrimary":"false"});
     let parsed = serde_json::from_value::<addresses::CreateAddressBody>(address.clone()).unwrap();
     assert!(parsed.is_primary, "Zod coerce.boolean('false') is true");
-    let parsed = serde_json::from_value::<addresses::UpdateAddressBody>(json!({"isPrimary":null})).unwrap();
+    let parsed =
+        serde_json::from_value::<addresses::UpdateAddressBody>(json!({"isPrimary":null})).unwrap();
     assert_eq!(parsed.is_primary, Some(false));
     let mut extra_address = address;
-    extra_address.as_object_mut().unwrap().insert("extra".into(), json!(true));
+    extra_address
+        .as_object_mut()
+        .unwrap()
+        .insert("extra".into(), json!(true));
     assert!(serde_json::from_value::<addresses::CreateAddressBody>(extra_address).is_err());
 
     let user = json!({"username":"creamuser","fullName":"Cream User","password":"Abcdef1!","roleId":Uuid::new_v4(),"unexpected":true});
