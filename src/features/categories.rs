@@ -63,7 +63,11 @@ fn name_validation_issues(name: &str) -> Vec<Value> {
     } else if len > 100 {
         issues.push(json!({"origin":"string","code":"too_big","maximum":100,"inclusive":true,"path":["name"],"message":"🚀 Whoa! Category Name is too long. Maximum allowed is 100 characters! ✍️ {Maximum Length}"}));
     }
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphabetic() || c.is_whitespace()) {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphabetic() || c.is_whitespace())
+    {
         issues.push(json!({"origin":"string","code":"invalid_format","format":"regex","pattern":"/^[A-Za-z\\s]+$/","path":["name"],"message":"Just letters & spaces, no secret codes! 🤨 {Name Only Letters}"}));
     }
     issues

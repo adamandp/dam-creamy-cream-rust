@@ -117,23 +117,55 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     })]))
 }
 
+// Match application/x-www-form-urlencoded decoding performed by Nest/Express
+// and Axum Query. Validation must inspect the decoded value, not %XX bytes.
+fn decode_query_component(input: &str) -> String {
+    fn hex(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        }
+    }
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex(bytes[index + 1]), hex(bytes[index + 2]))
+        {
+            decoded.push(hi * 16 + lo);
+            index += 3;
+            continue;
+        }
+        decoded.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 fn legacy_query_validation<T>(raw: &str) -> Option<Vec<Value>> {
     let class_name = std::any::type_name::<T>();
     let catalog = class_name.ends_with("products::CatalogQuery");
     if !catalog && !class_name.ends_with("common::Pagination") {
         return None;
     }
-    let params: Vec<(&str, &str)> = raw
+    let params: Vec<(String, String)> = raw
         .split('&')
         .filter(|part| !part.is_empty())
-        .map(|part| part.split_once('=').unwrap_or((part, "")))
+        .map(|part| {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            (decode_query_component(key), decode_query_component(value))
+        })
         .collect();
     let value = |field: &str| {
         params
             .iter()
             .rev()
-            .find(|(k, _)| *k == field)
-            .map(|(_, v)| *v)
+            .find(|(key, _)| key.as_str() == field)
+            .map(|(_, value)| value.as_str())
     };
     let mut errors = Vec::new();
 
@@ -162,7 +194,7 @@ fn legacy_query_validation<T>(raw: &str) -> Option<Vec<Value>> {
     if catalog {
         let unknown: Vec<&str> = params
             .iter()
-            .map(|(key, _)| *key)
+            .map(|(key, _)| key.as_str())
             .filter(|key| {
                 !matches!(
                     *key,

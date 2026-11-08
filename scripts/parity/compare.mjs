@@ -131,6 +131,9 @@ for (const [label, path] of [
   ['products catalog price ascending', '/products/catalog?sort=asc'],
   ['products catalog price descending', '/products/catalog?sort=desc'],
   ['products catalog search', '/products/catalog?q=Cream'],
+  ['products catalog decoded search', '/products/catalog?q=Cr%65am'],
+  ['products catalog decoded sort', '/products/catalog?sort=%61sc'],
+  ['products catalog decoded pagination', '/products/catalog?page=%31&limit=%31%30'],
   ['products catalog category', `/products/catalog?cat=${ids.category}`],
   ['products catalog minimum price', '/products/catalog?min=1000'],
   ['products catalog maximum price', '/products/catalog?max=50000'],
@@ -149,7 +152,7 @@ await compare('category description update', `/categories/${ids.category}`, 'PAT
 await compare('category updated detail', `/categories/${ids.category}`, 'GET', undefined, { ignoreUpdatedAt: true });
 await compare('category list stays cached after update', '/categories?page=1&limit=10');
 // Both backends reject unchanged PATCH values; error payload envelopes differ.
-await compare('category unchanged PATCH', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Cake' }, { statusOnly: true, expectError: true });
+await compare('category unchanged PATCH', `/categories/${ids.category}`, 'PATCH', { name: 'Cream Cake' }, { expectError: true });
 await compare('product description update', `/products/${ids.product}`, 'PATCH', { description: 'Creamy vanilla updated' });
 await compare('product detail after update', `/product/${ids.product}`);
 await compare('review comment update', `/reviews/${ids.review}`, 'PATCH', { comment: 'Loved it' });
@@ -161,12 +164,10 @@ await compare('voucher detail after update', `/vouchers/${ids.voucher}`, 'GET', 
 await compare('user voucher mark used', `/user-vouchers/${ids.userVoucher}`, 'PATCH', {});
 await compare('user voucher after used', `/user-vouchers/${ids.userVoucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
 
-// Phase 2: characterization of Nest's Zod DTO boundaries. Errors only
-// compare HTTP status, because the two frameworks use different envelopes.
-// Successful creates check the response envelope and status; IDs/timestamps
-// vary by database, so we verify follow-up state independently later.
-const expectError = { statusOnly: true, expectError: true };
-const statusOnly = { statusOnly: true };
+// Phase 2: compare complete NestJS/Zod responses including validation issues.
+// Generated IDs/timestamps are checked through normalized DB readbacks below.
+const expectError = { expectError: true };
+const statusOnly = {};
 await compare('products catalog unknown search', '/products/catalog?q=nomatch123', 'GET', undefined, expectError);
 await compare('catalog strict query rejects unknown keys', '/products/catalog?unexpected=x', 'GET', undefined, expectError);
 const discountCreate = {
