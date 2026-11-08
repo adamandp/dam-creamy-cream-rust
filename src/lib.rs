@@ -10,10 +10,13 @@ pub mod state;
 #[cfg(test)]
 mod pr2_tests;
 
+#[cfg(test)]
+mod pr3_tests;
+
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
-    routing::{get, post},
+    routing::{any, get, post},
 };
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
@@ -46,6 +49,10 @@ pub fn router(state: AppState) -> Router {
         .nest("/products", features::products::routes())
         .nest("/product", features::product::routes())
         .nest("/inventory", features::inventory::routes())
+        .nest("/carts", features::carts::routes())
+        .nest("/payments", features::payments::routes())
+        .nest("/shipments", features::shipments::routes())
+        .route("/orders", any(features::orders::unavailable))
         .nest("/reviews", features::reviews::routes())
         .nest("/discounts", features::discounts::routes())
         .nest("/product-discounts", features::product_discounts::routes())

@@ -34,6 +34,29 @@ where
     Ok(js_truthy(&value))
 }
 
+// z.coerce.number() accepts numeric text, booleans and null in request bodies.
+pub fn coerce_js_number<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Value::deserialize(deserializer)?;
+    let n = match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => {
+            if s.trim().is_empty() {
+                Some(0.0)
+            } else {
+                s.trim().parse().ok()
+            }
+        }
+        Value::Bool(b) => Some(if b { 1.0 } else { 0.0 }),
+        Value::Null => Some(0.0),
+        _ => None,
+    };
+    n.filter(|n| n.is_finite())
+        .ok_or_else(|| D::Error::custom("Invalid number"))
+}
+
 pub fn coerce_js_bool_optional<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
 where
     D: serde::Deserializer<'de>,

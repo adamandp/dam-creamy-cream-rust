@@ -59,10 +59,14 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     let is_voucher = class_name.ends_with("::vouchers::Create");
     let is_product = class_name.ends_with("::products::Create");
     let is_address = class_name.ends_with("::addresses::CreateAddressBody");
+    let is_cart = class_name.ends_with("::carts::CartInput");
+    let is_shipment_status = class_name.ends_with("::shipments::UpdateStatus");
     if !(is_category
         || is_discount
         || is_voucher
         || is_product
+        || is_cart
+        || is_shipment_status
         || class_name.ends_with("reviews::Create")
         || class_name.ends_with("product_discounts::Create")
         || is_address)
@@ -78,6 +82,15 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
         return Some(AppError::Validation(vec![json!({
             "code":"unrecognized_keys","keys":[field],"path":[],
             "message":format!("Unrecognized key: \"{field}\"")
+        })]));
+    }
+    if is_shipment_status
+        && (message.contains("unknown variant") || message.contains("missing field `status`"))
+    {
+        return Some(AppError::Validation(vec![json!({
+            "code":"invalid_value","values":["PENDING","SHIPPED","DELIVERED","CANCELLED"],
+            "path":["status"],
+            "message":"🎭 Status must be one of the following enum. Choose wisely! 🎯 {Invalid Enum}"
         })]));
     }
     if message.contains("isActive: invalid type:") && message.contains("expected a boolean") {

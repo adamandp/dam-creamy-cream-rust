@@ -2,6 +2,22 @@
 
 Rust/Axum + SeaORM rewrite of [`dam-creamy-cream-be`](https://github.com/adamandp/dam-creamy-cream-be), built as a feature-oriented modular monolith.
 
+## PR 3 of 5 — commerce
+
+This increment adds authenticated cart add/remove/read, shipment list/detail/status,
+and RajaOngkir shipping quote through `POST /shipments/cost`. Configure
+`RAJAONGKIR_BASE_URL` and `RAJAONGKIR_API_KEY` on the backend to enable live
+quotes. The quote body accepts `{ "origin": 1, "destination": 2, "weight": 1000 }`;
+the backend forwards the NestJS courier set as URL-encoded form fields.
+
+Payment HTTP endpoints retain the NestJS-generated scaffold strings. The
+original `OrdersController` has no HTTP methods, so the internal
+`features::orders::checkout::execute` and `find_all` logic is ported and tested
+without inventing a new public orders API. See [PR3 parity details](docs/pr3-parity.md)
+for the transaction steps and known differences. All commerce entities map to
+the existing PostgreSQL schema, including the quoted `order_items."finalPrice"`
+column; no migrations or legacy object transfer are performed.
+
 ## PR 1 of 5 — foundation and identity
 
 This first increment implements the existing NestJS routes for:

@@ -37,3 +37,16 @@ INSERT INTO vouchers (id, code, name, description, type, "group", value, minimum
 
 INSERT INTO user_vouchers (id, user_id, voucher_id, status, claimed_at, expired_at, created_at, updated_at) VALUES
 ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '22222222-2222-4222-8222-222222222222', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'CLAIMED', '2026-01-01', '2027-01-01', '2026-01-01', '2026-01-01');
+
+-- PR3 commerce fixtures. Both databases are disposable and receive the same rows.
+INSERT INTO carts (id, user_id, created_at, updated_at) VALUES
+('12121212-1212-4212-8212-121212121212', '22222222-2222-4222-8222-222222222222', '2026-01-01', '2026-01-01');
+
+INSERT INTO cart_items (id, cart_id, product_id, quantity, created_at, updated_at) VALUES
+('13131313-1313-4313-8313-131313131313', '12121212-1212-4212-8212-121212121212', '55555555-5555-4555-8555-555555555555', 4, '2026-01-01', '2026-01-01');
+
+INSERT INTO orders (id, user_id, address_id, voucher_amount, discount_amount, total_price, final_price, status, created_at, updated_at) VALUES
+('14141414-1414-4414-8414-141414141414', '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333', 0, 0, 15000, 16000, 'PENDING', '2026-01-01', '2026-01-01');
+
+INSERT INTO shipments (id, order_id, courier, service, cost, estimated, delivered_at, description, tracking_number, status, created_at, updated_at) VALUES
+('15151515-1515-4515-8515-151515151515', '14141414-1414-4414-8414-141414141414', 'jne', 'REG', 1000, '2026-01-05', NULL, NULL, NULL, 'PENDING', '2026-01-01', '2026-01-01');

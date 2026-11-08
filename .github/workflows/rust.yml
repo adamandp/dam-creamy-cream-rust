@@ -126,15 +126,21 @@ jobs:
           REFRESH_JWT_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           COOKIE_SECRET_KEY: parity-cookie-not-production
         run: |
+          node scripts/parity/raja_mock.mjs > "$RUNNER_TEMP/raja-parity.log" 2>&1 &
+          raja_pid=$!
           nest_entry="$RUNNER_TEMP/nest-reference/dist/src/main.js"
           if [ ! -f "$nest_entry" ]; then
             nest_entry="$RUNNER_TEMP/nest-reference/dist/main.js"
           fi
+          RAJAONGKIR_BASE_URL=http://127.0.0.1:3199 \
+          RAJAONGKIR_API_KEY=parity-raja-key \
           DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_nest \
           REDIS_URL=redis://127.0.0.1:6379/0 PORT=3101 \
             node "$nest_entry" \
             > "$RUNNER_TEMP/nest-parity.log" 2>&1 &
           nest_pid=$!
+          RAJAONGKIR_BASE_URL=http://127.0.0.1:3199 \
+          RAJAONGKIR_API_KEY=parity-raja-key \
           DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_rust \
           REDIS_URL=redis://127.0.0.1:6379/1 PORT=3102 \
           MINIO_ENDPOINT=http://127.0.0.1:9000 \
@@ -147,7 +153,7 @@ jobs:
           rust_pid=$!
           ready=0
           for attempt in $(seq 1 45); do
-            if ! kill -0 "$nest_pid" || ! kill -0 "$rust_pid"; then
+            if ! kill -0 "$nest_pid" || ! kill -0 "$rust_pid" || ! kill -0 "$raja_pid"; then
               break
             fi
             # HTTP status is part of differential testing, not readiness;
@@ -162,14 +168,17 @@ jobs:
           if [ "$ready" != 1 ]; then
             tail -100 "$RUNNER_TEMP/nest-parity.log"
             tail -100 "$RUNNER_TEMP/rust-parity.log"
+            tail -100 "$RUNNER_TEMP/raja-parity.log"
             exit 1
           fi
           parity_status=0
           node scripts/parity/compare.mjs || parity_status=1
           node scripts/parity/errors.mjs || parity_status=1
+          node scripts/parity/commerce.mjs || parity_status=1
           node scripts/parity/upload.mjs || parity_status=1
           if [ "$parity_status" != 0 ]; then
             tail -80 "$RUNNER_TEMP/nest-parity.log"
             tail -80 "$RUNNER_TEMP/rust-parity.log"
+            tail -80 "$RUNNER_TEMP/raja-parity.log"
             exit 1
           fi
