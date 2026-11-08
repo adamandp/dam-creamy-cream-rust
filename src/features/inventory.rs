@@ -54,7 +54,7 @@ async fn list(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("Inventory"));
+        return Err(crate::common::plain_not_found("Inventory"));
     }
     let data = inventory::Entity::find()
         .offset((page - 1) * limit)

@@ -332,7 +332,7 @@ async fn find_all(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("User"));
+        return Err(crate::common::plain_not_found("User"));
     }
     let rows = user::Entity::find()
         .order_by_asc(user::Column::CreatedAt)

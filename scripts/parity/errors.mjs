@@ -14,6 +14,10 @@ const unsigned = `${enc('{"alg":"HS256","typ":"JWT"}')}.${payload}`;
 const token = `${unsigned}.${createHmac('sha256',secret).update(unsigned).digest('base64url')}`;
 const absent = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const cases = [
+  ['health database ping', '/health/db'],
+  ['review list legacy decorators', '/reviews?page=1&limit=10'],
+  ['review by me legacy decorators', '/reviews/me?page=1&limit=10'],
+  ['user voucher by user route order', '/user-vouchers/user'],
   ['role detail absent', `/roles/${absent}`],
   ['role name absent', '/roles/name/notthere'],
   ['user detail absent', `/users/${absent}`],

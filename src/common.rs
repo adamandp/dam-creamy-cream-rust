@@ -120,9 +120,15 @@ pub fn require_changed_update(fields: &[(&str, Option<bool>)]) -> AppResult<()> 
 }
 
 pub fn not_found(resource: &str) -> AppError {
-    AppError::NotFound(format!(
-        "🔍 {resource} not found. Maybe it teleported to another dimension? 🛸"
-    ))
+    AppError::NotFound(success_not_found_message(resource))
+}
+
+pub fn plain_not_found(resource: &str) -> AppError {
+    AppError::PlainNotFound(success_not_found_message(resource))
+}
+
+pub fn success_not_found_message(resource: &str) -> String {
+    format!("🔍 {resource} not found. Maybe it teleported to another dimension? 🛸")
 }
 
 #[cfg(test)]

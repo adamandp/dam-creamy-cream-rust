@@ -143,7 +143,7 @@ async fn list(
         .map_err(AppError::db)?;
     // Legacy DiscountsService accidentally labels empty collection and successful lists as User.
     if total == 0 {
-        return Err(not_found("Users"));
+        return Err(crate::common::plain_not_found("Users"));
     }
     let data = discount::Entity::find()
         .offset((page - 1) * limit)

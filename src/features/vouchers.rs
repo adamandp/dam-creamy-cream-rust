@@ -164,7 +164,7 @@ async fn list(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("Voucher"));
+        return Err(crate::common::plain_not_found("Voucher"));
     }
     let data = voucher::Entity::find()
         .offset((page - 1) * limit)

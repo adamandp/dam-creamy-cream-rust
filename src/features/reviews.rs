@@ -116,7 +116,7 @@ async fn list(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("Review"));
+        return Err(crate::common::plain_not_found("Review"));
     }
     let data = review::Entity::find()
         .offset((page - 1) * limit)
@@ -154,7 +154,7 @@ async fn by_me(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("Review"));
+        return Err(crate::common::plain_not_found("Review"));
     }
     let data = query
         .offset((page - 1) * limit)
@@ -192,7 +192,7 @@ async fn by_product(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("Review"));
+        return Err(crate::common::plain_not_found("Review"));
     }
     let rows = query
         .offset((page - 1) * limit)

@@ -103,7 +103,7 @@ async fn list(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("category"));
+        return Err(crate::common::plain_not_found("category"));
     }
     let items = category::Entity::find()
         .offset((page - 1) * limit)
@@ -129,7 +129,7 @@ async fn one(State(state): State<AppState>, Path(id): Path<String>) -> AppResult
         .one(&state.db)
         .await
         .map_err(AppError::db)?
-        .ok_or_else(|| not_found("category"))?;
+        .ok_or_else(|| not_found("Category"))?;
     Ok(Json(detail("category", body(m))))
 }
 
@@ -146,7 +146,7 @@ async fn update(
         .one(&state.db)
         .await
         .map_err(AppError::db)?
-        .ok_or_else(|| not_found("category"))?;
+        .ok_or_else(|| not_found("Category"))?;
     if let Some(v) = &body.name {
         require_name(v, 1, 100, "name")?;
     }
@@ -190,7 +190,7 @@ async fn remove(
         .map_err(AppError::db)?
         .rows_affected;
     if count == 0 {
-        return Err(not_found("category"));
+        return Err(not_found("Category"));
     }
     Ok(Json(success("deleted", "category")))
 }

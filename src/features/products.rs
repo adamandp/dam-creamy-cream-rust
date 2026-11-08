@@ -185,7 +185,7 @@ async fn create(
         .map_err(AppError::db)?
         .is_none()
     {
-        return Err(not_found("category"));
+        return Err(not_found("Category"));
     }
     let now = Utc::now().naive_utc();
     product::ActiveModel {
@@ -216,7 +216,7 @@ async fn list(
         .await
         .map_err(AppError::db)?;
     if total == 0 {
-        return Err(not_found("Product"));
+        return Err(crate::common::plain_not_found("Product"));
     }
     let data = product::Entity::find()
         .offset((page - 1) * limit)
@@ -285,7 +285,7 @@ async fn catalog(
     }
     let total = query.clone().count(&s.db).await.map_err(AppError::db)?;
     if total == 0 && page == 1 {
-        return Err(not_found("Product"));
+        return Err(crate::common::plain_not_found("Product"));
     }
     query = match q.sort.as_deref() {
         Some("asc") => query.order_by_asc(product::Column::Price),
@@ -347,7 +347,7 @@ async fn update(
             .map_err(AppError::db)?
             .is_none()
     {
-        return Err(not_found("category"));
+        return Err(not_found("Category"));
     }
     require_changed_update(&[
         ("categoryId", b.category_id.map(|v| v == m.category_id)),
