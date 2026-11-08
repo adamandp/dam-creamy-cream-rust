@@ -60,14 +60,12 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     let is_product = class_name.ends_with("::products::Create");
     let is_address = class_name.ends_with("::addresses::CreateAddressBody");
     let is_cart = class_name.ends_with("::carts::CartInput");
-    let is_shipping_cost = class_name.ends_with("::shipments::CostInput");
     let is_shipment_status = class_name.ends_with("::shipments::UpdateStatus");
     if !(is_category
         || is_discount
         || is_voucher
         || is_product
         || is_cart
-        || is_shipping_cost
         || is_shipment_status
         || class_name.ends_with("reviews::Create")
         || class_name.ends_with("product_discounts::Create")
@@ -75,7 +73,7 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
     {
         return None;
     }
-    if (is_product || is_address || is_shipping_cost)
+    if (is_product || is_address)
         && let Some(field) = message
             .split("unknown field `")
             .nth(1)
@@ -102,13 +100,6 @@ fn legacy_json_validation<T>(message: &str) -> Option<AppError> {
         })]));
     }
     let field = message.split("missing field `").nth(1)?.split('`').next()?;
-    if is_shipping_cost && matches!(field, "origin" | "destination" | "weight") {
-        return Some(AppError::Validation(vec![json!({
-            "expected":"number","code":"invalid_type","received":"NaN",
-            "path":[field],
-            "message":format!("🔢 {field} must be a valid number. No funky math here! 🚫 {{Invalid Number}}")
-        })]));
-    }
     let (expected, display) = match field {
         "name" if is_category => ("string", "Category Name"),
         "name" if is_discount => ("string", "Discount Name"),

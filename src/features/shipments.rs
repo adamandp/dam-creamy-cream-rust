@@ -26,17 +26,6 @@ pub struct UpdateStatus {
     status: ShipmentStatus,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CostInput {
-    #[serde(deserialize_with = "crate::common::coerce_js_number")]
-    origin: f64,
-    #[serde(deserialize_with = "crate::common::coerce_js_number")]
-    destination: f64,
-    #[serde(deserialize_with = "crate::common::coerce_js_number")]
-    weight: f64,
-}
-
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/", get(list))
@@ -122,7 +111,36 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-async fn fetch_quote(base_url: &str, api_key: &str, req: &CostInput) -> AppResult<Value> {
+// The Nest controller imports CostDto using `import type`, which means
+// nestjs-zod never receives runtime DTO metadata for this handler. Its actual
+// HTTP behavior forwards extra/missing keys to RajaOngkir rather than returning
+// a local validation 400. Retain that runtime behavior for HTTP parity.
+fn form_fields(body: &Value) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    if let Some(values) = body.as_object() {
+        for (field, value) in values {
+            if field == "courier" {
+                continue;
+            }
+            let encoded = match value {
+                Value::Null => continue,
+                Value::String(text) => text.clone(),
+                Value::Bool(boolean) => boolean.to_string(),
+                Value::Number(number) => number.to_string(),
+                _ => value.to_string(),
+            };
+            fields.push((field.to_owned(), encoded));
+        }
+    }
+    fields.push(("courier".into(), COURIERS.into()));
+    fields
+}
+
+async fn fetch_quote(
+    base_url: &str,
+    api_key: &str,
+    fields: &[(String, String)],
+) -> AppResult<Value> {
     let failure = || {
         AppError::ExternalService(
             "❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into(),
@@ -134,12 +152,7 @@ async fn fetch_quote(base_url: &str, api_key: &str, req: &CostInput) -> AppResul
             base_url.trim_end_matches('/')
         ))
         .header("key", api_key)
-        .form(&[
-            ("origin", req.origin.to_string()),
-            ("destination", req.destination.to_string()),
-            ("weight", req.weight.to_string()),
-            ("courier", COURIERS.to_owned()),
-        ])
+        .form(fields)
         .send()
         .await
         .map_err(|e| {
@@ -161,7 +174,7 @@ async fn fetch_quote(base_url: &str, api_key: &str, req: &CostInput) -> AppResul
     Ok(json!({"message":message,"status":status,"data":data}))
 }
 
-async fn cost(ApiJson(req): ApiJson<CostInput>) -> AppResult<(StatusCode, Json<Value>)> {
+async fn cost(ApiJson(req): ApiJson<Value>) -> AppResult<(StatusCode, Json<Value>)> {
     let failure = || {
         AppError::ExternalService(
             "❌ Oops! Failed to create Shipping cost. Try again later! 🤦‍♂️".into(),
@@ -171,7 +184,7 @@ async fn cost(ApiJson(req): ApiJson<CostInput>) -> AppResult<(StatusCode, Json<V
     let key = std::env::var("RAJAONGKIR_API_KEY").map_err(|_| failure())?;
     Ok((
         StatusCode::CREATED,
-        Json(fetch_quote(&url, &key, &req).await?),
+        Json(fetch_quote(&url, &key, &form_fields(&req)).await?),
     ))
 }
 
@@ -182,16 +195,14 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn cost_dto_matches_zod_coercion_and_strictness() {
-        let dto: CostInput =
-            serde_json::from_value(json!({"origin":"1","destination":20,"weight":true})).unwrap();
-        assert_eq!((dto.origin, dto.destination, dto.weight), (1.0, 20.0, 1.0));
-        assert!(
-            serde_json::from_value::<CostInput>(
-                json!({"origin":1,"destination":2,"weight":100,"extra":5})
-            )
-            .is_err()
-        );
+    fn shipping_quote_preserves_extra_fields_and_missing_origin() {
+        let fields = form_fields(&json!({
+            "destination":20,"weight":1000,"extra":true,"courier":"bad"
+        }));
+        assert!(!fields.iter().any(|(key, _)| key == "origin"));
+        assert!(fields.contains(&("extra".into(), "true".into())));
+        assert!(fields.contains(&("courier".into(), COURIERS.into())));
+        assert_eq!(fields.iter().filter(|(key, _)| key == "courier").count(), 1);
     }
 
     #[tokio::test]
@@ -204,6 +215,7 @@ mod tests {
             assert_eq!(fields["origin"], "12");
             assert_eq!(fields["destination"], "34");
             assert_eq!(fields["weight"], "1000");
+            assert_eq!(fields["extra"], "true");
             assert_eq!(fields["courier"], COURIERS);
             Json(json!({"meta":{"message":"success","code":200},"data":[{"service":"REG"}]}))
         }
@@ -218,12 +230,8 @@ mod tests {
             .await
             .unwrap();
         });
-        let input = CostInput {
-            origin: 12.0,
-            destination: 34.0,
-            weight: 1000.0,
-        };
-        let result = fetch_quote(&base_url, "test-rajaongkir-key", &input)
+        let input = json!({"origin":12,"destination":34,"weight":1000,"extra":true});
+        let result = fetch_quote(&base_url, "test-rajaongkir-key", &form_fields(&input))
             .await
             .unwrap();
         assert_eq!(
