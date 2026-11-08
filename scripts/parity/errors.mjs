@@ -45,6 +45,16 @@ const cases = [
   ['pagination invalid text', '/categories?page=abc&limit=10'],
   ['category create missing description', '/categories', 'POST', {name:'Cream Extra',isActive:true}],
   ['product create missing description', '/products', 'POST', {categoryId:'44444444-4444-4444-8444-444444444444',name:'Cream',price:10000,isActive:true}],
+  ['category invalid name', '/categories', 'POST', {name:'Cr3am',description:null,isActive:true}],
+  ['category empty name', '/categories', 'POST', {name:'',description:null,isActive:true}],
+  ['category wrong boolean', '/categories', 'POST', {name:'Cream',description:null,isActive:'true'}],
+  ['product invalid price', '/products', 'POST', {categoryId:'44444444-4444-4444-8444-444444444444',name:'Cream',description:null,price:0,isActive:true}],
+  ['product unknown fields', '/products', 'POST', {categoryId:'44444444-4444-4444-8444-444444444444',name:'Cream',description:null,price:10000,isActive:true,extra:true}],
+  ['discount missing nullable', '/discounts', 'POST', {name:'Test',discountType:'FIXED',maxApplied:1,maxRedeemed:10,redeemedCount:0,description:null,productId:null,quantity:null,startDate:'2026-11-08',endDate:'2026-12-08'}],
+  ['voucher missing nullable', '/vouchers', 'POST', {code:'TEST',name:'Test Voucher',description:null,type:'FIXED',group:'CHECKOUT',productId:null,quantity:null,minimumPurchase:1000,isActive:true,startDate:'2026-11-08',endDate:'2026-12-08',maxRedeemed:10,redeemedCount:0}],
+  ['review invalid rating', '/reviews', 'POST', {userId:'22222222-2222-4222-8222-222222222222',productId:'55555555-5555-4555-8555-555555555555',rating:6}],
+  ['address invalid phone', '/addresses', 'POST', {userId:'22222222-2222-4222-8222-222222222222',recipientName:'Parity',recipientPhoneNumber:'abc',province:'Banten',city:'Tangerang',subdistrict:'Serpong',village:'Lengkong',postalCode:'15310',address:'Cream Street',isPrimary:false}],
+  ['address unknown field', '/addresses', 'POST', {userId:'22222222-2222-4222-8222-222222222222',recipientName:'Parity',recipientPhoneNumber:'081234567890',province:'Banten',city:'Tangerang',subdistrict:'Serpong',village:'Lengkong',postalCode:'15310',address:'Cream Street',isPrimary:false,unexpected:42}],
   ['inventory empty PATCH', '/inventory/66666666-6666-4666-8666-666666666666', 'PATCH', {}],
 ];
 
@@ -61,6 +71,16 @@ const legacyExceptions = new Set([
   'user voucher by user route order',
   'category bad UUID',
   'inventory bad UUID',
+  'category invalid name',
+  'category empty name',
+  'category wrong boolean',
+  'product invalid price',
+  'product unknown fields',
+  'discount missing nullable',
+  'voucher missing nullable',
+  'review invalid rating',
+  'address invalid phone',
+  'address unknown field',
 ]);
 
 async function invoke(base, path, method = 'GET', body) {
