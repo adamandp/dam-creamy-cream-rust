@@ -350,7 +350,13 @@ mod tests {
             .stderr(std::process::Stdio::piped())
             .spawn()
             .unwrap();
-        upload.stdin.take().unwrap().write_all(&sample).await.unwrap();
+        upload
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&sample)
+            .await
+            .unwrap();
         let upload_output = upload.wait_with_output().await.unwrap();
         assert!(
             upload_output.status.success(),

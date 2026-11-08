@@ -22,6 +22,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/creamy_cream_test
       TEST_MINIO_ENDPOINT: http://127.0.0.1:9000
@@ -65,3 +74,68 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --all-targets --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build pinned NestJS reference and Rust API
+        run: |
+          git clone --quiet https://github.com/adamandp/dam-creamy-cream-be.git "$RUNNER_TEMP/nest-reference"
+          git -C "$RUNNER_TEMP/nest-reference" checkout --quiet 7a3407b
+          cd "$RUNNER_TEMP/nest-reference"
+          npm ci --no-audit --no-fund
+          npx prisma generate
+          npm run build
+          cd "$GITHUB_WORKSPACE"
+          cargo build --locked
+      - name: Seed two isolated, identically migrated databases
+        run: |
+          export PGPASSWORD=postgres
+          psql --host localhost --username postgres --dbname postgres --set ON_ERROR_STOP=1 \
+            --command 'CREATE DATABASE creamy_nest'
+          psql --host localhost --username postgres --dbname postgres --set ON_ERROR_STOP=1 \
+            --command 'CREATE DATABASE creamy_rust'
+          for name in creamy_nest creamy_rust; do
+            (cd "$RUNNER_TEMP/nest-reference" && \
+              DATABASE_URL="postgres://postgres:postgres@localhost:5432/$name" \
+              npx prisma migrate deploy)
+            psql --host localhost --username postgres --dbname "$name" \
+              --set ON_ERROR_STOP=1 --file scripts/parity/seed.sql
+          done
+      - name: Compare NestJS and Axum HTTP contracts
+        env:
+          ACCESS_JWT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          REFRESH_JWT_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          COOKIE_SECRET_KEY: parity-cookie-not-production
+        run: |
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_nest \
+          REDIS_URL=redis://127.0.0.1:6379/0 PORT=3101 \
+            node "$RUNNER_TEMP/nest-reference/dist/main.js" \
+            > "$RUNNER_TEMP/nest-parity.log" 2>&1 &
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/creamy_rust \
+          REDIS_URL=redis://127.0.0.1:6379/1 PORT=3102 \
+          MINIO_ENDPOINT=http://127.0.0.1:9000 \
+          MINIO_ACCESS_KEY=test-access-key \
+          MINIO_SECRET_KEY=test-secret-key \
+          MINIO_BUCKET=creamy-cream-parity \
+          PUBLIC_BASE_URL=http://127.0.0.1:3102 \
+            target/debug/dam-creamy-cream-rust \
+            > "$RUNNER_TEMP/rust-parity.log" 2>&1 &
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent 'http://127.0.0.1:3101/roles?page=1&limit=10' >/dev/null && \
+               curl --fail --silent 'http://127.0.0.1:3102/roles/?page=1&limit=10' >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            tail -100 "$RUNNER_TEMP/nest-parity.log"
+            tail -100 "$RUNNER_TEMP/rust-parity.log"
+            exit 1
+          fi
+          if ! node scripts/parity/compare.mjs; then
+            tail -80 "$RUNNER_TEMP/nest-parity.log"
+            tail -80 "$RUNNER_TEMP/rust-parity.log"
+            exit 1
+          fi

@@ -60,9 +60,18 @@ not considered equivalent unless called out below.
 - `src/pr2_tests.rs` exercises an isolated PostgreSQL schema when
   `TEST_DATABASE_URL` is configured. Additional checks characterize legacy
   pagination, name validation, and inventory patch behavior.
-- Running the tests requires PostgreSQL and a Rust toolchain. Live MinIO upload
-  confirmation and Redis cache-staleness behavior require configured services.
-- These tests are **characterization tests of selected behaviors**, not a
-  two-runtime automated differential test of every route and edge case.
-- PR #2 is not certified 100% parity until a full route/DTO response matrix and
-  Nest-vs-Rust differential tests are run on matching disposable data sets.
+- CI builds the fixed NestJS reference SHA, starts both backends against
+  **separate migrated PostgreSQL databases seeded with identical fixtures**,
+  runs independent Redis databases, and compares real HTTP statuses, response
+  JSON, PATCH responses and persisted updates using
+  `scripts/parity/compare.mjs`. Any unexpected mismatch fails CI.
+- The differential matrix covers 27 PR1/PR2 GET scenarios and five additional
+  PATCH/readback cases. It intentionally excludes legacy broken controller
+  decorators, different authorization rules, and the agreed upload change.
+- CI also boots an isolated MinIO instance and executes the storage integration
+  test with a **real presigned HTTP PUT**, verify, immutable copy, GET and
+  cleanup; it fails if `TEST_MINIO_ENDPOINT` is unavailable.
+- Running both test sets requires PostgreSQL, Redis, MinIO, Node.js, and Rust.
+  Differential testing of the entire route/DTO edge-case matrix, cache
+  staleness and browser-specific CORS conditions is still **not complete**;
+  the current matrix is a reproducible parity gate, not 100% certification.
