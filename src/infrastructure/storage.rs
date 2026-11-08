@@ -268,6 +268,7 @@ mod signature_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     async fn presigned_put_signs_upload_headers() {
@@ -326,16 +327,36 @@ mod tests {
             .write_to(&mut sample, image::ImageFormat::Png)
             .unwrap();
         let sample = sample.into_inner();
-        storage
-            .client
-            .put_object()
-            .bucket(&storage.bucket)
-            .key(&pending)
-            .content_type("image/png")
-            .body(aws_sdk_s3::primitives::ByteStream::from(sample.clone()))
-            .send()
+        // Exercise the actual browser-direct flow against an isolated MinIO:
+        // signed URL -> external HTTP PUT -> HEAD/GET verification -> immutable
+        // copy -> delete. The AWS SDK is deliberately not used for the upload.
+        let upload_url = storage
+            .presign_put(&pending, "image/png", sample.len() as i64)
             .await
             .unwrap();
+        let mut upload = tokio::process::Command::new("curl")
+            .arg("--fail-with-body")
+            .arg("--silent")
+            .arg("--show-error")
+            .arg("--request")
+            .arg("PUT")
+            .arg("--header")
+            .arg("Content-Type: image/png")
+            .arg("--data-binary")
+            .arg("@-")
+            .arg(upload_url)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        upload.stdin.take().unwrap().write_all(&sample).await.unwrap();
+        let upload_output = upload.wait_with_output().await.unwrap();
+        assert!(
+            upload_output.status.success(),
+            "presigned HTTP PUT failed: {}",
+            String::from_utf8_lossy(&upload_output.stderr)
+        );
         let etag = storage.verify_image(&pending).await.unwrap();
         storage
             .copy_verified_image(&pending, &permanent, &etag)

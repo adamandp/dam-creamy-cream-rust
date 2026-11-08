@@ -24,12 +24,29 @@ jobs:
           --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/creamy_cream_test
+      TEST_MINIO_ENDPOINT: http://127.0.0.1:9000
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Start isolated MinIO for S3 integration tests
+        run: |
+          docker run --detach --name creamy-minio-test \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=test-access-key \
+            --env MINIO_ROOT_PASSWORD=test-secret-key \
+            quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z \
+            server /data --address :9000
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs creamy-minio-test
+          exit 1
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
