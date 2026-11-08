@@ -54,6 +54,12 @@ not considered equivalent unless called out below.
 4. Nest `ReviewsController` omits parameter decorators on `findAll` and
    `findByUser`. The Rust handlers preserve the intended list behavior rather
    than intentionally reproducing a missing-decorator runtime failure.
+5. The PR #1 address write paths deliberately enforce a single-primary
+   invariant and reject some ownership transfers that the Nest update path
+   permits. This is a prior security/data-integrity change, **not** 1:1 logic.
+6. Zod's date coercion accepts a wider variety of JavaScript date inputs than
+   the Rust ISO/date-only parser (notably numeric timestamps); those formats
+   are not yet contract-equivalent.
 
 ## Verification / limits
 
@@ -65,9 +71,12 @@ not considered equivalent unless called out below.
   runs independent Redis databases, and compares real HTTP statuses, response
   JSON, PATCH responses and persisted updates using
   `scripts/parity/compare.mjs`. Any unexpected mismatch fails CI.
-- The differential matrix covers 28 PR1/PR2 GET scenarios and 16 additional
-  PATCH/readback and cache-staleness cases. It intentionally excludes legacy broken controller
-  decorators, different authorization rules, and the agreed upload change.
+- The differential matrix covers the original 28 GET scenarios, 16 additional
+  PATCH/readback/cache-staleness cases, plus catalog query variants and
+  negative/positive Zod DTO cases (unknown keys, required-nullable fields,
+  strict objects, coercion and date-only values). It intentionally excludes
+  legacy broken controller decorators, different authorization rules, and
+  the agreed upload change.
 - CI also boots an isolated MinIO instance and executes the storage integration
   test with a **real presigned HTTP PUT**, verify, immutable copy, GET and
   cleanup; it fails if `TEST_MINIO_ENDPOINT` is unavailable.

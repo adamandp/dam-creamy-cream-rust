@@ -26,15 +26,19 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Create {
     code: String,
     name: String,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     description: Option<String>,
     r#type: VoucherType,
     group: VoucherGroup,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     value: Option<f64>,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     product_id: Option<Uuid>,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     quantity: Option<i32>,
     minimum_purchase: f64,
     is_active: bool,
@@ -44,7 +48,7 @@ pub struct Create {
     redeemed_count: i32,
 }
 #[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Update {
     code: Option<String>,
     name: Option<String>,
@@ -95,7 +99,7 @@ fn validate(
     minimum: f64,
 ) -> AppResult<()> {
     require_text(code, 1, 50, "code")?;
-    require_name(name, 1, 50, "name")?;
+    require_name(name, 1, 100, "name")?;
     if let Some(v) = description {
         require_text(v, 1, 255, "description")?;
     }
@@ -123,15 +127,8 @@ async fn create(
         b.value,
         b.minimum_purchase,
     )?;
-    if let Some(id) = b.product_id
-        && product::Entity::find_by_id(id)
-            .one(&s.db)
-            .await
-            .map_err(AppError::db)?
-            .is_none()
-    {
-        return Err(not_found("Product"));
-    }
+    // Nest's create() does not precheck productId; the database owns the
+    // foreign-key error. Only update() explicitly validates that relation.
     let now = Utc::now().naive_utc();
     voucher::ActiveModel {
         id: Set(Uuid::new_v4()),

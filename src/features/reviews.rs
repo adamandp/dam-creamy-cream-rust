@@ -26,7 +26,7 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Create {
     user_id: Uuid,
     product_id: Uuid,
@@ -34,7 +34,7 @@ pub struct Create {
     comment: Option<String>,
 }
 #[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Update {
     rating: Option<i32>,
     #[serde(

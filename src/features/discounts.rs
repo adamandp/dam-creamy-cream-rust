@@ -23,23 +23,27 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Create {
     name: String,
     discount_type: DiscountType,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     value: Option<f64>,
     max_applied: i32,
     max_redeemed: i32,
     redeemed_count: i32,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     description: Option<String>,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     product_id: Option<Uuid>,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     quantity: Option<i32>,
     start_date: String,
     end_date: String,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Update {
     name: Option<String>,
     discount_type: Option<DiscountType>,
@@ -82,7 +86,7 @@ pub fn body(m: discount::Model) -> Value {
 }
 
 fn validate(name: &str, value: Option<f64>) -> AppResult<()> {
-    require_name(name, 1, 50, "name")?;
+    require_name(name, 1, 100, "name")?;
     // Nest's DTO only checks numeric type; no nonnegative limits, redeemed
     // cap, or start/end ordering is enforced on these fields.
     if value.is_some_and(|v| !v.is_finite()) {

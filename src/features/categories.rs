@@ -24,15 +24,16 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Create {
     name: String,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     description: Option<String>,
     is_active: bool,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Update {
     name: Option<String>,
     #[serde(

@@ -37,6 +37,7 @@ pub struct Create {
     category_id: Uuid,
     discount_id: Option<Uuid>,
     name: String,
+    #[serde(deserialize_with = "crate::common::required_nullable")]
     description: Option<String>,
     price: f64,
     is_active: bool,

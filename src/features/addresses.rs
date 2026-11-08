@@ -44,10 +44,11 @@ pub struct CreateAddressBody {
     pub subdistrict: String,
     #[validate(length(min = 1, max = 100))]
     pub village: String,
-    #[validate(length(max = 50))]
+    #[validate(length(max = 100))]
     pub postal_code: String,
     #[validate(length(min = 1, max = 100))]
     pub address: String,
+    #[serde(deserialize_with = "crate::common::coerce_js_bool")]
     pub is_primary: bool,
 }
 
@@ -67,10 +68,11 @@ pub struct UpdateAddressBody {
     pub subdistrict: Option<String>,
     #[validate(length(min = 1, max = 100))]
     pub village: Option<String>,
-    #[validate(length(max = 50))]
+    #[validate(length(max = 100))]
     pub postal_code: Option<String>,
     #[validate(length(min = 1, max = 100))]
     pub address: Option<String>,
+    #[serde(default, deserialize_with = "crate::common::coerce_js_bool_optional")]
     pub is_primary: Option<bool>,
 }
 

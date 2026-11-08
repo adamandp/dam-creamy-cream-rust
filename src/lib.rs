@@ -665,7 +665,7 @@ mod tests {
             })
         };
         let mut invalid_postal_code = address_body("Invalid postal", false);
-        invalid_postal_code["postalCode"] = json!("X".repeat(51));
+        invalid_postal_code["postalCode"] = json!("X".repeat(101));
         assert_eq!(
             send_json(
                 app.clone(),
@@ -749,7 +749,7 @@ mod tests {
                 axum::http::Method::PATCH,
                 format!("/addresses/{first}"),
                 owner_token.clone(),
-                json!({"postalCode": "X".repeat(51)})
+                json!({"postalCode": "X".repeat(101)})
             )
             .await,
             StatusCode::BAD_REQUEST

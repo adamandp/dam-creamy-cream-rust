@@ -126,6 +126,23 @@ async function compare(label, path, method = 'GET', body, options = {}) {
 
 for (const [label, path] of cases) await compare(label, path);
 
+for (const [label, path] of [
+  ['products catalog default sorting', '/products/catalog?sort=default'],
+  ['products catalog price ascending', '/products/catalog?sort=asc'],
+  ['products catalog price descending', '/products/catalog?sort=desc'],
+  ['products catalog search', '/products/catalog?q=Cream'],
+  ['products catalog unknown search', '/products/catalog?q=nomatch123'],
+  ['products catalog category', `/products/catalog?cat=${ids.category}`],
+  ['products catalog minimum price', '/products/catalog?min=1000'],
+  ['products catalog maximum price', '/products/catalog?max=50000'],
+  ['products catalog min/max range', '/products/catalog?min=1000&max=50000'],
+  ['products catalog second page', '/products/catalog?page=2&limit=1'],
+  ['users profile', '/users/profile'],
+  ['roles second page', '/roles?page=2&limit=1'],
+  ['products second page', '/products?page=2&limit=1'],
+  ['categories second page', '/categories?page=2&limit=1'],
+]) await compare(label, path);
+
 // Deterministic PATCH scenarios verify both mutations and their DB effects.
 await compare('inventory quantity update', `/inventory/${ids.inventory}`, 'PATCH', { quantity: 20 });
 await compare('inventory updated detail', `/inventory/${ids.inventory}`, 'GET', undefined, { ignoreUpdatedAt: true });
@@ -145,5 +162,57 @@ await compare('voucher detail after update', `/vouchers/${ids.voucher}`, 'GET', 
 await compare('user voucher mark used', `/user-vouchers/${ids.userVoucher}`, 'PATCH', {});
 await compare('user voucher after used', `/user-vouchers/${ids.userVoucher}`, 'GET', undefined, { ignoreUpdatedAt: true });
 
-console.log(`\nNestJS ↔ Axum differential: ${passed} matched, ${failed} mismatched, ${cases.length + 16} scenarios.`);
+// Phase 2: characterization of Nest's Zod DTO boundaries. Errors only
+// compare HTTP status, because the two frameworks use different envelopes.
+// Successful creates check the response envelope and status; IDs/timestamps
+// vary by database, so we verify follow-up state independently later.
+const expectError = { statusOnly: true, expectError: true };
+const statusOnly = { statusOnly: true };
+const discountCreate = {
+  name: 'Cream Sale', discountType: 'FIXED', value: null,
+  maxApplied: 1, maxRedeemed: 10, redeemedCount: 0,
+  description: null, productId: null, quantity: null,
+  startDate: '2026-11-08T00:00:00.000Z', endDate: '2026-12-08T00:00:00.000Z',
+};
+const voucherCreate = {
+  code: 'CREAM-PARITY', name: 'Cream Voucher Parity', description: null,
+  type: 'FIXED', group: 'CHECKOUT', value: null, productId: null,
+  quantity: null, minimumPurchase: 1000, isActive: true,
+  startDate: '2026-11-08T00:00:00.000Z', endDate: '2026-12-08T00:00:00.000Z',
+  maxRedeemed: 10, redeemedCount: 0,
+};
+const addressCreate = {
+  userId: ids.user, recipientName: 'Parity', recipientPhoneNumber: '081234567890',
+  province: 'Banten', city: 'Tangerang', subdistrict: 'Serpong',
+  village: 'Lengkong', postalCode: '15310', address: 'Cream Street', isPrimary: 'false',
+};
+await compare('category missing required nullable description', '/categories', 'POST', { name: 'Cream Category', isActive: true }, expectError);
+await compare('category unknown field stripped', '/categories', 'POST', { name: 'Cream New', description: null, isActive: true, discardedField: 123 }, statusOnly);
+await compare('category description null allowed', '/categories', 'POST', { name: 'Cream Nullable', description: null, isActive: false }, statusOnly);
+await compare('product missing required nullable description', '/products', 'POST', { categoryId: ids.category, name: 'Cream Product', price: 12000, isActive: true }, expectError);
+await compare('product strictly rejects unknown fields', '/products', 'POST', { categoryId: ids.category, name: 'Cream Product', description: null, price: 12000, isActive: true, extra: true }, expectError);
+for (const field of ['value', 'description', 'productId', 'quantity']) {
+  const invalid = { ...discountCreate };
+  delete invalid[field];
+  await compare(`discount missing nullable ${field}`, '/discounts', 'POST', invalid, expectError);
+}
+await compare('discount strips unknown and accepts explicit nulls', '/discounts', 'POST', { ...discountCreate, ignored: 'okay' }, statusOnly);
+await compare('discount accepts date-only strings like Zod', '/discounts', 'POST', {
+  ...discountCreate, name: 'Cream Date Sale', startDate: '2026-11-08', endDate: '2026-12-08',
+}, statusOnly);
+for (const field of ['value', 'description', 'productId', 'quantity']) {
+  const invalid = { ...voucherCreate };
+  delete invalid[field];
+  await compare(`voucher missing nullable ${field}`, '/vouchers', 'POST', invalid, expectError);
+}
+await compare('voucher strips unknown and accepts explicit nulls', '/vouchers', 'POST', { ...voucherCreate, ignored: 'okay' }, statusOnly);
+await compare('review strips unknown fields', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 4, comment: null, unknown: 'ignored' }, statusOnly);
+await compare('review invalid rating', '/reviews', 'POST', { userId: ids.user, productId: ids.product, rating: 6 }, expectError);
+await compare('product-discount missing discountId', '/product-discounts', 'POST', { productId: ids.product }, expectError);
+await compare('user-voucher strips unknown fields', '/user-vouchers', 'POST', { userId: ids.user, voucherId: ids.voucher, claimedAt: '2026-11-08T00:00:00.000Z', expiredAt: '2026-12-08T00:00:00.000Z', ignored: true }, statusOnly);
+await compare('address coerce boolean string', '/addresses', 'POST', addressCreate, statusOnly);
+await compare('address reject invalid phone', '/addresses', 'POST', { ...addressCreate, recipientPhoneNumber: 'abc' }, expectError);
+await compare('address strict extra fields', '/addresses', 'POST', { ...addressCreate, unexpected: 42 }, expectError);
+
+console.log(`\nNestJS ↔ Axum differential: ${passed} matched, ${failed} mismatched, ${passed + failed} scenarios.`);
 if (failed) process.exitCode = 1;

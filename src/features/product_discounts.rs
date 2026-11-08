@@ -26,7 +26,7 @@ use crate::{
 };
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Create {
     product_id: Uuid,
     discount_id: Uuid,

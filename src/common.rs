@@ -4,6 +4,43 @@ use serde_json::{Value, json};
 
 use crate::error::{AppError, AppResult};
 
+// Zod's `.nullable()` requires that a key exists but accepts an explicit
+// `null`. Serde's ordinary Option<T> would also accept a *missing* key.
+pub fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
+// This intentionally mirrors z.coerce.boolean() / JavaScript Boolean(value),
+// including the surprising fact that the nonempty string "false" is true.
+fn js_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64().is_some_and(|number| number != 0.0),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
+    }
+}
+
+pub fn coerce_js_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(js_truthy(&value))
+}
+
+pub fn coerce_js_bool_optional<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    coerce_js_bool(deserializer).map(Some)
+}
+
 #[derive(Deserialize, Default)]
 pub struct Pagination {
     pub page: Option<i64>,

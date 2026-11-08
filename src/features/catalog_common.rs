@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::{
@@ -19,6 +19,11 @@ pub fn timestamps(created: NaiveDateTime, updated: NaiveDateTime) -> (String, St
 }
 
 pub fn parse_datetime(s: &str) -> AppResult<NaiveDateTime> {
+    // z.coerce.date() accepts date-only JSON strings and interprets them as
+    // midnight UTC. This is common in the Nest discount/voucher DTOs.
+    if let Ok(day) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Ok(day.and_hms_opt(0, 0, 0).expect("midnight is valid"));
+    }
     DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&Utc).naive_utc())
         .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f"))
