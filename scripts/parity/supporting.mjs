@@ -11,6 +11,7 @@ const userId = '22222222-2222-4222-8222-222222222222';
 const productId = '55555555-5555-4555-8555-555555555555';
 const notificationId = '17171717-1717-4717-8717-171717171717';
 const userNotificationId = '18181818-1818-4818-8818-181818181818';
+const classicProductId = '20202020-2020-4020-8020-202020202020';
 const payload = { sub: userId, role: '11111111-1111-4111-8111-111111111111', iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+900 };
 const unsigned = `${Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url')}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
 const token = `${unsigned}.${createHmac('sha256',secret).update(unsigned).digest('base64url')}`;
@@ -43,8 +44,10 @@ await compare('analytics product','/product-analytics/product/'+productId+'?page
 await compare('analytics count','/product-analytics/product/'+productId+'/count');
 await compare('analytics user','/product-analytics/user?page=1&limit=10');
 await compare('recommendation categories','/recommendations/categories');
+await compare('recommendation classic','/recommendations/classic');
 await compare('recommendation offers','/recommendations/offers');
 await compare('recommendation related','/recommendations/related/'+productId);
+await compare('recommendation related classic','/recommendations/related/'+classicProductId);
 await compare('notifications list','/notifications?page=1&limit=10');
 await compare('notifications detail','/notifications/'+notificationId);
 await compare('user notifications list','/user-notifications?page=1&limit=10');
