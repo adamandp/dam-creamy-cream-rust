@@ -50,3 +50,13 @@ INSERT INTO orders (id, user_id, address_id, voucher_amount, discount_amount, to
 
 INSERT INTO shipments (id, order_id, courier, service, cost, estimated, delivered_at, description, tracking_number, status, created_at, updated_at) VALUES
 ('15151515-1515-4515-8515-151515151515', '14141414-1414-4414-8414-141414141414', 'jne', 'REG', 1000, '2026-01-05', NULL, NULL, NULL, 'PENDING', '2026-01-01', '2026-01-01');
+
+-- PR4 supporting features, shared by the Nest and Axum databases.
+INSERT INTO product_analytics (id, user_id, product_id, created_at) VALUES
+('16161616-1616-4616-8616-161616161616', '22222222-2222-4222-8222-222222222222', '55555555-5555-4555-8555-555555555555', '2026-01-01');
+
+INSERT INTO notifications (id, title, message, created_at, updated_at) VALUES
+('17171717-1717-4717-8717-171717171717', 'Creamy Update', 'New cream flavors are available', '2026-01-01', '2026-01-01');
+
+INSERT INTO user_notifications (id, user_id, notification_id, is_read, created_at, updated_at) VALUES
+('18181818-1818-4818-8818-181818181818', '22222222-2222-4222-8222-222222222222', '17171717-1717-4717-8717-171717171717', false, '2026-01-01', '2026-01-01');
