@@ -28,4 +28,13 @@ SeaORM entities map directly to existing PostgreSQL tables (`product_analytics`,
 
 ## Verification
 
-`cargo fmt --all -- --check`, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --all-targets --locked` pass locally (40 tests, including two new recommendation regression tests). The existing PostgreSQL and MinIO integration tests are environment-gated; this run did **not** execute an authenticated real-database HTTP differential against NestJS for these four feature modules. A green compile/test result must not be described as full 1:1 parity.
+The latest PR4 GitHub Actions run (`42602650041`) passed:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --locked -- -D warnings`.
+- `cargo test --all-targets --locked`: **42 passed**, including four recommendation regression tests.
+- Existing HTTP contract differential: **113 matched, 0 mismatched**.
+- Existing error contract differential: **38 matched, 0 mismatched** (five known Nest legacy exceptions tracked separately).
+- PR3 commerce differential: **28 matched, 0 mismatched**.
+- PR4 supporting-feature HTTP differential against two independent, identically migrated PostgreSQL databases: **22 matched, 0 mismatched**. The cases cover create/read/update, product analytics, recommendations (classic, offers, categories and related), count and read-state behavior. PR4 recommendations receive additional deterministic fixtures after the base suites and before the Rust-only MinIO upload changes image URLs.
+
+This demonstrates parity on the **tested cases**, not mathematical proof that arbitrary requests, concurrent traffic or all legacy bugs will behave identically. The intentional security/API differences described above remain.
