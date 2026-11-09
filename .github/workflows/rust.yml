@@ -175,6 +175,12 @@ jobs:
           node scripts/parity/compare.mjs || parity_status=1
           node scripts/parity/errors.mjs || parity_status=1
           node scripts/parity/commerce.mjs || parity_status=1
+          # Add PR4 fixtures after catalog/commerce, before the intentionally Rust-only MinIO upload mutates image URLs.
+          for name in creamy_nest creamy_rust; do
+            PGPASSWORD=postgres psql --host localhost --username postgres --dbname "$name" \
+              --set ON_ERROR_STOP=1 --file scripts/parity/supporting-seed.sql || parity_status=1
+          done
+          node scripts/parity/supporting.mjs || parity_status=1
           node scripts/parity/upload.mjs || parity_status=1
           if [ "$parity_status" != 0 ]; then
             tail -80 "$RUNNER_TEMP/nest-parity.log"
