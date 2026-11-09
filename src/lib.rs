@@ -58,6 +58,13 @@ pub fn router(state: AppState) -> Router {
         .nest("/product-discounts", features::product_discounts::routes())
         .nest("/vouchers", features::vouchers::routes())
         .nest("/user-vouchers", features::user_vouchers::routes())
+        .nest("/product-analytics", features::product_analytics::routes())
+        .nest("/recommendations", features::recommendations::routes())
+        .nest("/notifications", features::notifications::routes())
+        .nest(
+            "/user-notifications",
+            features::user_notifications::routes(),
+        )
         .route("/media/users/{id}/{asset}", get(features::users::get_image))
         .route(
             "/media/products/{id}/{asset}",
