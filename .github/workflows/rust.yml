@@ -172,10 +172,11 @@ jobs:
             exit 1
           fi
           parity_status=0
+          # PR4 fixture reads must run before the older differential suite mutates/deletes products.
+          node scripts/parity/supporting.mjs || parity_status=1
           node scripts/parity/compare.mjs || parity_status=1
           node scripts/parity/errors.mjs || parity_status=1
           node scripts/parity/commerce.mjs || parity_status=1
-          node scripts/parity/supporting.mjs || parity_status=1
           node scripts/parity/upload.mjs || parity_status=1
           if [ "$parity_status" != 0 ]; then
             tail -80 "$RUNNER_TEMP/nest-parity.log"

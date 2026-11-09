@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::catalog_common::detail;
 use crate::{
-    common::{not_found, parse_uuid},
+    common::{parse_uuid, plain_not_found},
     entity::{
         category,
         discount::{self, DiscountType},
@@ -38,19 +38,27 @@ struct Ranked {
 }
 impl Ranked {
     fn json(&self) -> Value {
-        let discount_price = self
-            .discount_value
-            .filter(|v| *v != 0.0)
-            .map(|_| self.model.price - self.discount_amount);
+        // Nest only populates discount fields when `activeDiscount?.value` is truthy.
+        let has_discount = self.discount_value.is_some_and(|v| v != 0.0);
+        let discount_price = has_discount.then_some(self.model.price - self.discount_amount);
         json!({"id":self.model.id,"name":self.model.name,"imageUrl":self.model.image_url.as_deref().unwrap_or(""),
             "description":self.model.description.as_deref().unwrap_or(""),"rate":self.rating,"price":self.model.price,
-            "discountPrice":discount_price,"discountType":self.discount_type,"discountValue":self.discount_value})
+            "discountPrice":discount_price,"discountType":if has_discount {self.discount_type.clone()}else{None},"discountValue":if has_discount {self.discount_value}else{None}})
     }
 }
 fn by_rating_sales(a: &Ranked, b: &Ranked) -> Ordering {
     b.rating
         .total_cmp(&a.rating)
         .then_with(|| b.sales.cmp(&a.sales))
+}
+fn legacy_offer_sort_amount(item: &Ranked) -> f64 {
+    match &item.discount_type {
+        Some(DiscountType::Fixed) => item.discount_value.unwrap_or(0.0),
+        // Nest's `value || 0 * product.price` has JS operator precedence:
+        // a nonzero percentage is divided by 100 without multiplication by price.
+        Some(DiscountType::Percentage) => item.discount_value.unwrap_or(0.0) / 100.0,
+        _ => 0.0,
+    }
 }
 async fn ranked(s: &AppState, products: Vec<product::Model>) -> AppResult<Vec<Ranked>> {
     if products.is_empty() {
@@ -142,7 +150,7 @@ async fn classic(State(s): State<AppState>) -> AppResult<Json<Value>> {
             .map_err(AppError::db)?
     };
     if products.is_empty() {
-        return Err(not_found("Classic Recommendations"));
+        return Err(plain_not_found("Classic Recommendations"));
     }
     let mut items = ranked(&s, products).await?;
     items.sort_by(by_rating_sales);
@@ -158,7 +166,7 @@ async fn categories(State(s): State<AppState>) -> AppResult<Json<Value>> {
         .await
         .map_err(AppError::db)?;
     if cats.is_empty() {
-        return Err(not_found("Categories Recommendations"));
+        return Err(plain_not_found("Categories Recommendations"));
     }
     let mut data = Vec::new();
     for c in cats {
@@ -194,13 +202,13 @@ async fn offers(State(s): State<AppState>) -> AppResult<Json<Value>> {
             .map_err(AppError::db)?
     };
     if products.is_empty() {
-        return Err(not_found("Offer Recommendations"));
+        return Err(plain_not_found("Offer Recommendations"));
     }
     // Prisma's take(5) applies before the subsequent discount/rating sort.
     let mut items = ranked(&s, products.into_iter().take(5).collect()).await?;
     items.sort_by(|a, b| {
-        b.discount_amount
-            .total_cmp(&a.discount_amount)
+        legacy_offer_sort_amount(b)
+            .total_cmp(&legacy_offer_sort_amount(a))
             .then_with(|| by_rating_sales(a, b))
     });
     Ok(Json(detail(
@@ -214,7 +222,7 @@ async fn related(State(s): State<AppState>, Path(id): Path<String>) -> AppResult
         .one(&s.db)
         .await
         .map_err(AppError::db)?
-        .ok_or_else(|| not_found("Related Recommendations"))?;
+        .ok_or_else(|| plain_not_found("Related Recommendations"))?;
     let products = product::Entity::find()
         .filter(product::Column::IsActive.eq(true))
         .filter(product::Column::Id.ne(id))
@@ -239,7 +247,7 @@ async fn related(State(s): State<AppState>, Path(id): Path<String>) -> AppResult
     }
     items.truncate(5);
     if items.is_empty() {
-        return Err(not_found("Related Recommendations"));
+        return Err(plain_not_found("Related Recommendations"));
     }
     Ok(Json(detail(
         "Related Recommendations",
@@ -299,5 +307,29 @@ mod tests {
         assert_eq!(value["discountValue"], 20.0);
         assert_eq!(value["imageUrl"], "");
         assert_eq!(value["rate"], 0.0);
+    }
+
+    #[test]
+    fn zero_discount_does_not_expose_discount_type_or_value() {
+        let mut row = product("No discount", 0.0, 0);
+        row.discount_value = Some(0.0);
+        let value = row.json();
+        assert!(value["discountPrice"].is_null());
+        assert!(value["discountType"].is_null());
+        assert!(value["discountValue"].is_null());
+    }
+
+    #[test]
+    fn legacy_offer_percentage_sort_is_not_a_price_reduction_sort() {
+        let mut percentage = product("Percentage", 0.0, 0);
+        percentage.discount_type = Some(DiscountType::Percentage);
+        percentage.discount_value = Some(20.0);
+        percentage.discount_amount = 20.0;
+        let mut fixed = product("Fixed", 0.0, 0);
+        fixed.discount_type = Some(DiscountType::Fixed);
+        fixed.discount_value = Some(1.0);
+        fixed.discount_amount = 1.0;
+        assert!(legacy_offer_sort_amount(&fixed) > legacy_offer_sort_amount(&percentage));
+        assert_eq!(percentage.json()["discountPrice"], 80.0);
     }
 }
