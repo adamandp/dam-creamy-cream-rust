@@ -56,6 +56,8 @@ await compare('user notifications count','/user-notifications/count/me');
 await compare('notification user associations','/user-notifications/notification/'+notificationId+'?page=1&limit=10');
 await compare('notification user associations count','/user-notifications/notification/'+notificationId+'/count');
 await compare('analytics create','/product-analytics','POST',{userId,productId});
+await compare('notification create','/notifications','POST',{title:'Parity New Notification',message:'Created by supporting differential'});
+await compare('user notification create','/user-notifications','POST',{userId,notificationId,isRead:false});
 await compare('notification update','/notifications/'+notificationId,'PATCH',{title:'Creamy News'});
 await compare('notification updated detail','/notifications/'+notificationId,'GET',undefined,true);
 await compare('user notification mark read','/user-notifications/'+userNotificationId,'PATCH');

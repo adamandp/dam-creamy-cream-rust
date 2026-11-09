@@ -55,23 +55,6 @@ INSERT INTO shipments (id, order_id, courier, service, cost, estimated, delivere
 INSERT INTO product_analytics (id, user_id, product_id, created_at) VALUES
 ('16161616-1616-4616-8616-161616161616', '22222222-2222-4222-8222-222222222222', '55555555-5555-4555-8555-555555555555', '2026-01-01');
 
--- Extra active category and product fixtures exercise successful classic/related recommendations.
-INSERT INTO category (id, name, description, is_active, created_at, updated_at) VALUES
-('19191919-1919-4919-8919-191919191919', 'Classic Favorites', 'Classic product category', true, '2026-01-01', '2026-01-01');
-
-INSERT INTO products (id, category_id, name, image_url, description, price, is_active, created_at, updated_at) VALUES
-('20202020-2020-4020-8020-202020202020', '19191919-1919-4919-8919-191919191919', 'Classic Vanilla', NULL, 'Vanilla', 10000, true, '2026-01-01', '2026-01-01'),
-('21212121-2121-4121-8121-212121212121', '19191919-1919-4919-8919-191919191919', 'Classic Strawberry', NULL, 'Strawberry', 20000, true, '2026-01-01', '2026-01-01');
-
-INSERT INTO reviews (id, user_id, product_id, rating, comment, created_at, updated_at) VALUES
-('22222222-3333-4333-8333-222222222222', '22222222-2222-4222-8222-222222222222', '20202020-2020-4020-8020-202020202020', 4, 'Classic vanilla', '2026-01-01', '2026-01-01'),
-('22222222-4444-4444-8444-222222222222', '22222222-2222-4222-8222-222222222222', '21212121-2121-4121-8121-212121212121', 3, 'Classic strawberry', '2026-01-01', '2026-01-01');
-
-INSERT INTO discounts (id, name, discount_type, value, max_applied, max_redeemed, redeemed_count, description, start_date, end_date, created_at, updated_at) VALUES
-('23232323-2323-4323-8323-232323232323', 'Classic Percent', 'PERCENTAGE', 10, 10, 100, 0, 'Discount percent', '2026-01-01', '2027-01-01', '2026-01-01', '2026-01-01');
-
-INSERT INTO product_discounts (id, product_id, discount_id, is_active, created_at, updated_at) VALUES
-('24242424-2424-4424-8424-242424242424', '21212121-2121-4121-8121-212121212121', '23232323-2323-4323-8323-232323232323', true, '2026-01-01', '2026-01-01');
 
 INSERT INTO notifications (id, title, message, created_at, updated_at) VALUES
 ('17171717-1717-4717-8717-171717171717', 'Creamy Update', 'New cream flavors are available', '2026-01-01', '2026-01-01');
